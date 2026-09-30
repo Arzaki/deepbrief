@@ -1,0 +1,10 @@
+id,config,coverage,citation_accuracy,faithfulness,supported,partial,unsupported,latency_s,tokens,cost_usd,llm_calls,tool_calls,trace
+q01,baseline,0.0,0.0,0.0,0,0,1,0.0,20,0.0,1,0,traces\run_f223ec5c9764.json
+q02,baseline,0.0,0.0,0.0,0,0,1,0.0,20,0.0,1,0,traces\run_68d692fc687e.json
+q03,baseline,0.0,0.0,0.0,0,0,1,0.0,20,0.0,1,0,traces\run_2e2a4eee08ca.json
+q01,multi-no-critic,0.0,0.0,0.0,0,0,1,0.0,160,0.0,8,0,traces\run_fb57906ba8a4.json
+q02,multi-no-critic,0.0,0.0,0.0,0,0,1,0.0,160,0.0,8,0,traces\run_995771c9a9ed.json
+q03,multi-no-critic,0.0,0.0,0.0,0,0,1,0.0,160,0.0,8,0,traces\run_ebfcc641d8a1.json
+q01,multi-critic,0.0,0.0,0.0,0,0,1,0.0,180,0.0,9,0,traces\run_306be8471132.json
+q02,multi-critic,0.0,0.0,0.0,0,0,1,0.0,180,0.0,9,0,traces\run_e26ae16dfbfb.json
+q03,multi-critic,0.0,0.0,0.0,0,0,1,0.0,180,0.0,9,0,traces\run_f4d04c925b79.json
