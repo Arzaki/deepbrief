@@ -27,6 +27,7 @@ def run_planner(
     trace=None,
     temperature: float = 0.0,
     seed: int | None = None,
+    max_tokens: int = 1000,
 ) -> Plan:
     system = _prompt_text()
     messages = [
@@ -42,7 +43,7 @@ def run_planner(
                     "content": f"Previous output failed validation: {last_err}. Return ONLY valid JSON.",
                 }
             ]
-        resp = llm.complete(messages, model, temperature=temperature, seed=seed)
+        resp = llm.complete(messages, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
         if trace:
             trace.log_llm("planner", model, resp.input_tokens, resp.output_tokens, resp.latency_s)
         try:

@@ -40,6 +40,7 @@ def run_baseline(
     trace=None,
     temperature: float = 0.0,
     seed: int | None = None,
+    max_tokens: int = 1000,
     max_iters: int = 10,
     search_fn=None,
     fetch_fn=None,
@@ -68,7 +69,7 @@ def run_baseline(
         if reason:
             abort_reason = reason
             break
-        resp = llm.complete(transcript, model, temperature=temperature, seed=seed)
+        resp = llm.complete(transcript, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
         if trace:
             trace.log_llm("baseline", model, resp.input_tokens, resp.output_tokens, resp.latency_s)
         budgets.register_llm(resp.input_tokens + resp.output_tokens)

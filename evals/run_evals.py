@@ -73,6 +73,7 @@ def run_one(question: dict, config: str, settings: Settings, cache, judge, judge
             trace=trace,
             temperature=settings.temperature,
             seed=settings.seed,
+            max_tokens=settings.llm_max_tokens,
             **stubs,
         )
         findings_claims: list[dict] = []
@@ -89,6 +90,7 @@ def run_one(question: dict, config: str, settings: Settings, cache, judge, judge
             seed=settings.seed,
             use_critic=False,
             max_revisions=settings.max_revisions,
+            max_tokens=settings.llm_max_tokens,
             **stubs,
         )
         findings_claims = [
@@ -109,6 +111,7 @@ def run_one(question: dict, config: str, settings: Settings, cache, judge, judge
             seed=settings.seed,
             use_critic=True,
             max_revisions=settings.max_revisions,
+            max_tokens=settings.llm_max_tokens,
             **stubs,
         )
         findings_claims = [
@@ -117,12 +120,13 @@ def run_one(question: dict, config: str, settings: Settings, cache, judge, judge
             for c in f.claims
         ]
     md = out["markdown"]
-    cov = judge_coverage(md, question.get("must_have_facts", []), judge, judge_model)
+    cov = judge_coverage(md, question.get("must_have_facts", []), judge, judge_model, settings.llm_max_tokens)
     ent = judge_entailment(
         findings_claims
         or [{"text": s.heading, "supporting_quote": "", "page_text": md} for s in out["report"].sections],
         judge,
         judge_model,
+        settings.llm_max_tokens,
     )
     latency = round(time.time() - t0, 2)
     trace_path = str(trace.save())

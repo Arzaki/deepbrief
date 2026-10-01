@@ -34,4 +34,5 @@
 | date | config | notes |
 |---|---|---|
 | 2026-09-30 | offline mock × 3 configs | all metrics 0.000 (placeholder reports); harness plumbing verified |
-| TBD | live 25q × 3 configs | needs GROQ_API_KEY + judge key |
+| 2026-10-01 | live Groq, multi-critic via UI | 404 `model_not_found` on default cheap model `llama-3.1-8b-instant` (retired from plan; live `/models` listed 11 IDs, no llama-3.x). Retry logic correctly did NOT retry a 404. Fixed by switching Groq defaults to `openai/gpt-oss-120b` / `openai/gpt-oss-20b` (both on live list, documented tool-use + JSON support) and adding `scripts/check_models.py` + a friendly UI error for future retirements |
+| TBD | live 25q × 3 configs | needs judge key for cross-family judging |

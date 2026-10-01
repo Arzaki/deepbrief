@@ -30,9 +30,12 @@ def web_search(query: str, max_results: int = 5, cache=None, trace=None) -> list
                     }
                 )
         else:
-            from ddgs import DDGS
+            try:
+                from ddgs import DDGS  # duckduckgo-search v9+
+            except ImportError:
+                from duckduckgo_search import DDGS  # v8 and earlier
 
-            with DDGS() as ddgs:
+            with DDGS(timeout=15) as ddgs:
                 for r in ddgs.text(query, max_results=max_results):
                     results.append(
                         {

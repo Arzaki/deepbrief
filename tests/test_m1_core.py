@@ -38,6 +38,23 @@ def test_with_retries_eventual_success():
     assert calls["n"] == 3
 
 
+def test_request_too_large_429_fails_fast_without_retry():
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        raise LLMError("Request too large for model (OTPM limit)", status=429, retryable=False)
+
+    with pytest.raises(LLMError):
+        with_retries(fn, max_retries=4, base=0.001)
+    assert calls["n"] == 1  # no point retrying: smaller max_tokens is the only fix
+
+
+def test_explicit_retryable_false_beats_status():
+    assert LLMError("x", status=500, retryable=False).retryable is False
+    assert LLMError("x", status=400).retryable is None
+
+
 def test_with_retries_non_retryable():
     def fn():
         raise LLMError("bad request", status=400)

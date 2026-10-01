@@ -54,25 +54,48 @@ def run_fn(question: str, mode: str, session: str, progress: gr.Progress | None 
     budgets = Budgets(s.max_llm_calls, s.max_tool_calls, s.max_tokens, s.max_wall_seconds)
     progress(0.1, desc="Planning...")
     t0 = time.time()
-    if mode == "baseline":
-        out = run_baseline(question, llm, s.resolved_agent_model(), budgets, cache, trace, s.temperature, s.seed)
-        url_map = {}
-    else:
-        progress(0.3, desc="Researching sub-questions...")
-        out = run_pipeline(
-            question,
-            llm,
-            s.resolved_agent_model(),
-            s.resolved_cheap_model(),
-            budgets,
-            cache,
-            trace,
-            s.temperature,
-            s.seed,
-            use_critic=(mode == "multi-critic"),
-        )
-        url_map = {src.id: src.url for f in out.get("findings", []) for src in f.sources}
-        progress(0.9, desc="Writing + critiquing...")
+    try:
+        if mode == "baseline":
+            out = run_baseline(
+                question,
+                llm,
+                s.resolved_agent_model(),
+                budgets,
+                cache,
+                trace,
+                s.temperature,
+                s.seed,
+                max_tokens=s.llm_max_tokens,
+            )
+            url_map = {}
+        else:
+            progress(0.3, desc="Researching sub-questions...")
+            out = run_pipeline(
+                question,
+                llm,
+                s.resolved_agent_model(),
+                s.resolved_cheap_model(),
+                budgets,
+                cache,
+                trace,
+                s.temperature,
+                s.seed,
+                use_critic=(mode == "multi-critic"),
+                max_tokens=s.llm_max_tokens,
+            )
+            url_map = {src.id: src.url for f in out.get("findings", []) for src in f.sources}
+            progress(0.9, desc="Writing + critiquing...")
+    except Exception as e:
+        elapsed = round(time.time() - t0, 1)
+        msg = str(e)
+        hint = ""
+        if "model_not_found" in msg or "does not exist" in msg:
+            hint = (
+                "\n\n**The configured model ID is retired or unavailable on your plan.** "
+                "Run `uv run python scripts/check_models.py` to list live IDs, then set "
+                "`AGENT_MODEL` / `CHEAP_MODEL` in `.env` to a listed one."
+            )
+        return f"Run failed after {elapsed}s: {msg}{hint}", "error", ""
     tp = trace.save()
     elapsed = round(time.time() - t0, 1)
     stats = (

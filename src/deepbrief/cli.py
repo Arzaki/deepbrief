@@ -41,6 +41,7 @@ def main():
             trace,
             s.temperature,
             s.seed,
+            max_tokens=s.llm_max_tokens,
         )
     else:
         out = run_pipeline(
@@ -54,6 +55,7 @@ def main():
             s.temperature,
             s.seed,
             use_critic=(args.mode == "multi"),
+            max_tokens=s.llm_max_tokens,
         )
     tp = trace.save()
     print(out["markdown"])

@@ -26,6 +26,7 @@ def run_researcher(
     trace=None,
     temperature: float = 0.0,
     seed: int | None = None,
+    max_tokens: int = 1000,
     max_iters: int = 6,
     search_fn=None,
     fetch_fn=None,
@@ -89,7 +90,7 @@ def run_researcher(
     for _ in range(max_iters):
         if budgets and budgets.check():
             break
-        resp = llm.complete(transcript, model, temperature=temperature, seed=seed)
+        resp = llm.complete(transcript, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
         if trace:
             trace.log_llm(
                 "researcher",

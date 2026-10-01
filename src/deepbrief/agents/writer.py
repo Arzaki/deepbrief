@@ -26,6 +26,7 @@ def run_writer(
     trace=None,
     temperature: float = 0.0,
     seed: int | None = None,
+    max_tokens: int = 1000,
     feedback: str = "",
 ) -> Report:
     try:
@@ -40,6 +41,7 @@ def run_writer(
         model,
         temperature=temperature,
         seed=seed,
+        max_tokens=max_tokens,
     )
     if trace:
         trace.log_llm("writer", model, resp.input_tokens, resp.output_tokens, resp.latency_s)

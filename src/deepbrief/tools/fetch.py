@@ -6,7 +6,7 @@ import httpx
 import trafilatura
 
 
-def fetch_page(url: str, cache=None, trace=None, timeout: int = 20) -> dict:
+def fetch_page(url: str, cache=None, trace=None, timeout: int = 12) -> dict:
     if cache is not None:
         hit = cache.get_json("page", url)
         if hit is not None:

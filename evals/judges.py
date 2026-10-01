@@ -7,7 +7,9 @@ from deepbrief.llm import BaseProvider
 from deepbrief.schemas import CoverageJudgment, CoverageResult, EntailmentJudgment, EntailmentResult
 
 
-def judge_coverage(report_md: str, facts: list[str], llm: BaseProvider, model: str) -> CoverageResult:
+def judge_coverage(
+    report_md: str, facts: list[str], llm: BaseProvider, model: str, max_tokens: int = 1000
+) -> CoverageResult:
     if llm.name == "mock":
         # Offline heuristic: fact present if >=60% of its significant words appear.
         judgments = []
@@ -26,12 +28,12 @@ def judge_coverage(report_md: str, facts: list[str], llm: BaseProvider, model: s
             f"Report:\n{report_md[:6000]}\n\nFact: {fact}\n"
             'Return STRICT JSON: {"fact": "...", "present": true|false, "evidence": "..."}'
         )
-        resp = llm.complete([{"role": "user", "content": prompt}], model, temperature=0.0)
+        resp = llm.complete([{"role": "user", "content": prompt}], model, temperature=0.0, max_tokens=max_tokens)
         judgments.append(CoverageJudgment.model_validate(parse_json_strict(resp.text)))
     return CoverageResult(judgments=judgments)
 
 
-def judge_entailment(claims: list[dict], llm: BaseProvider, model: str) -> EntailmentResult:
+def judge_entailment(claims: list[dict], llm: BaseProvider, model: str, max_tokens: int = 1000) -> EntailmentResult:
     if llm.name == "mock":
         from deepbrief.verify import quote_found
 
@@ -53,7 +55,7 @@ def judge_entailment(claims: list[dict], llm: BaseProvider, model: str) -> Entai
             f"Source excerpt: {c.get('page_text', '')[:3000]}\n"
             'Return STRICT JSON: {"claim_index": N, "verdict": "supported|partially|unsupported", "reason": "..."}'
         )
-        resp = llm.complete([{"role": "user", "content": prompt}], model, temperature=0.0)
+        resp = llm.complete([{"role": "user", "content": prompt}], model, temperature=0.0, max_tokens=max_tokens)
         d = parse_json_strict(resp.text)
         d["claim_index"] = i
         judgments.append(EntailmentJudgment.model_validate(d))

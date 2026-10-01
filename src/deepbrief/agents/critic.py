@@ -20,6 +20,7 @@ def run_critic(
     trace=None,
     temperature: float = 0.0,
     seed: int | None = None,
+    max_tokens: int = 1000,
 ) -> Critique:
     try:
         system = PROMPT.read_text(encoding="utf-8")
@@ -34,6 +35,7 @@ def run_critic(
         model,
         temperature=temperature,
         seed=seed,
+        max_tokens=max_tokens,
     )
     if trace:
         trace.log_llm("critic", model, resp.input_tokens, resp.output_tokens, resp.latency_s)

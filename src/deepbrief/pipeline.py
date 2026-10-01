@@ -24,6 +24,7 @@ def run_pipeline(
     trace=None,
     temperature: float = 0.0,
     seed: int | None = None,
+    max_tokens: int = 1000,
     use_critic: bool = True,
     max_revisions: int = 2,
     search_fn=None,
@@ -34,7 +35,9 @@ def run_pipeline(
     cheap_model = cheap_model or model
     t0 = time.time()
     abort_reason = ""
-    plan = run_planner(question, llm, cheap_model, trace=trace, temperature=temperature, seed=seed)
+    plan = run_planner(
+        question, llm, cheap_model, trace=trace, temperature=temperature, seed=seed, max_tokens=max_tokens
+    )
     budgets.register_llm(50)  # planner accounting approximated via trace; keep counter moving
     all_findings = []
     page_texts: dict[str, str] = {}
@@ -52,6 +55,7 @@ def run_pipeline(
             trace=trace,
             temperature=temperature,
             seed=seed,
+            max_tokens=max_tokens,
             search_fn=search_fn,
             fetch_fn=fetch_fn,
         )
@@ -72,12 +76,22 @@ def run_pipeline(
             trace=trace,
             temperature=temperature,
             seed=seed,
+            max_tokens=max_tokens,
             feedback=feedback,
         )
         budgets.register_llm(100)
         if not use_critic:
             break
-        critique = run_critic(report, all_findings, llm, cheap_model, trace=trace, temperature=temperature, seed=seed)
+        critique = run_critic(
+            report,
+            all_findings,
+            llm,
+            cheap_model,
+            trace=trace,
+            temperature=temperature,
+            seed=seed,
+            max_tokens=max_tokens,
+        )
         budgets.register_llm(50)
         if critique.verdict == "pass" or rounds >= max_revisions:
             if rounds >= max_revisions and critique.verdict == "revise":

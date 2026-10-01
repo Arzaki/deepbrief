@@ -15,10 +15,19 @@ from .config import Settings
 
 
 class LLMError(RuntimeError):
-    def __init__(self, message: str, status: int | None = None, retry_after: float | None = None):
+    def __init__(
+        self,
+        message: str,
+        status: int | None = None,
+        retry_after: float | None = None,
+        retryable: bool | None = None,
+    ):
         super().__init__(message)
         self.status = status
         self.retry_after = retry_after
+        # None = decide from status (429/5xx retryable). Set False to fail fast,
+        # e.g. "request too large" 429s where retrying can never succeed.
+        self.retryable = retryable
 
 
 @dataclass
@@ -48,7 +57,10 @@ def with_retries(fn, max_retries: int = 4, base: float = 1.0):
             return fn()
         except LLMError as e:
             last = e
-            retryable = e.status is None or e.status == 429 or (e.status is not None and e.status >= 500)
+            if e.retryable is None:
+                retryable = e.status is None or e.status == 429 or (e.status is not None and e.status >= 500)
+            else:
+                retryable = e.retryable
             if not retryable or attempt == max_retries:
                 raise
             time.sleep(compute_backoff(attempt, base=base, retry_after=e.retry_after))
@@ -69,7 +81,7 @@ class BaseProvider:
         model: str,
         temperature: float = 0.0,
         seed: int | None = None,
-        max_tokens: int = 2048,
+        max_tokens: int = 1000,
     ) -> LLMResponse:
         raise NotImplementedError
 
@@ -83,7 +95,7 @@ class OpenAICompatibleProvider(BaseProvider):
         self.name = name
         self._client = OpenAI(api_key=api_key, base_url=base_url)
 
-    def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=2048) -> LLMResponse:
+    def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=1000) -> LLMResponse:
         from openai import APIStatusError, APITimeoutError, RateLimitError
 
         def _call() -> LLMResponse:
@@ -96,8 +108,11 @@ class OpenAICompatibleProvider(BaseProvider):
                     kwargs["seed"] = seed
                 resp = self._client.chat.completions.create(**kwargs)
             except RateLimitError as e:
-                retry_after = _parse_retry_after(getattr(e, "response", None))
-                raise LLMError(str(e), status=429, retry_after=retry_after) from e
+                # "Request too large" 429s are about max_tokens, not rate: fail fast with a hint.
+                too_large = "request too large" in str(e).lower()
+                hint = " Hint: lower LLM_MAX_TOKENS (this plan caps output tokens per request)." if too_large else ""
+                retry_after = None if too_large else _parse_retry_after(getattr(e, "response", None))
+                raise LLMError(str(e) + hint, status=429, retry_after=retry_after, retryable=not too_large) from e
             except APIStatusError as e:
                 retry_after = _parse_retry_after(getattr(e, "response", None))
                 raise LLMError(str(e), status=getattr(e, "status_code", None), retry_after=retry_after) from e
@@ -136,7 +151,7 @@ class MockProvider(BaseProvider):
         self.script = list(script or [])
         self.calls: list[dict] = []
 
-    def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=2048) -> LLMResponse:
+    def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=1000) -> LLMResponse:
         self.calls.append({"messages": messages, "model": model})
         if self.script:
             text = self.script.pop(0)

@@ -24,6 +24,9 @@ class Settings(BaseSettings):
 
     temperature: float = 0.0
     seed: int = 42
+    # Per-request output cap. Free-tier plans (e.g. Groq on_demand OTPM 1000)
+    # reject requests whose max_tokens exceeds the limit, so keep this small.
+    llm_max_tokens: int = 1000
 
     max_llm_calls: int = 30
     max_tool_calls: int = 30
@@ -37,8 +40,13 @@ class Settings(BaseSettings):
     prompt_version: str = "v1"
 
     # Sensible per-provider defaults applied only when env leaves the model blank.
+    # Groq IDs verified live against /models on 2026-10-01. Notes:
+    # - llama-3.3/3.1 IDs retired from this plan (404 model_not_found).
+    # - openai/gpt-oss-* emit NATIVE server-side tool calls instead of plain text,
+    #   which is incompatible with our text TOOL: protocol (400 tool_use_failed).
+    #   qwen follows the text protocol, so it is the default on Groq for now.
     PROVIDER_DEFAULTS: dict = {
-        "groq": {"agent": "llama-3.3-70b-versatile", "cheap": "llama-3.1-8b-instant"},
+        "groq": {"agent": "qwen/qwen3.8-27b", "cheap": "qwen/qwen3.8-27b"},
         "openai": {"agent": "gpt-4o-mini", "cheap": "gpt-4o-mini"},
         "gemini": {"agent": "gemini-2.0-flash", "cheap": "gemini-2.0-flash-lite"},
         "mock": {"agent": "mock-agent", "cheap": "mock-cheap"},
@@ -68,8 +76,13 @@ def get_settings() -> Settings:
 
 
 # Price table (USD per 1K tokens). APPROXIMATE — for relative comparison only.
-# Sources: public provider pricing pages, snapshot 2026-09. Update as needed.
+# Llama rows: public pricing snapshot 2026-09. gpt-oss rows: Groq docs 2026-10-01.
+# Update as needed; verify with scripts/check_models.py + provider pricing pages.
 PRICE_TABLE: dict[str, dict[str, float]] = {
+    "openai/gpt-oss-120b": {"input": 0.00015, "output": 0.0006},
+    "openai/gpt-oss-20b": {"input": 0.000075, "output": 0.0003},
+    # qwen row from a third-party listing (ai-api-hub, 2026-09) — UNVERIFIED, confirm in console.
+    "qwen/qwen3.8-27b": {"input": 0.0008, "output": 0.004},
     "llama-3.3-70b-versatile": {"input": 0.00059, "output": 0.00079},
     "llama-3.1-8b-instant": {"input": 0.00005, "output": 0.00008},
     "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
