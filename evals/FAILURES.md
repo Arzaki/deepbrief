@@ -34,5 +34,8 @@
 | date | config | notes |
 |---|---|---|
 | 2026-09-30 | offline mock × 3 configs | all metrics 0.000 (placeholder reports); harness plumbing verified |
-| 2026-10-01 | live Groq, multi-critic via UI | 404 `model_not_found` on default cheap model `llama-3.1-8b-instant` (retired from plan; live `/models` listed 11 IDs, no llama-3.x). Retry logic correctly did NOT retry a 404. Fixed by switching Groq defaults to `openai/gpt-oss-120b` / `openai/gpt-oss-20b` (both on live list, documented tool-use + JSON support) and adding `scripts/check_models.py` + a friendly UI error for future retirements |
+| 2026-10-01 | live Groq, multi-critic via UI | 404 `model_not_found` on default cheap model `llama-3.1-8b-instant` (retired from plan; live `/models` listed 11 IDs, no llama-3.x). Retry logic correctly did NOT retry a 404. Added `scripts/check_models.py` + a friendly UI error for future retirements |
+| 2026-10-01 | live Groq, baseline via CLI | 400 `tool_use_failed` on first replacement `openai/gpt-oss-120b`: it emits NATIVE `container.exec` tool calls instead of plain text, incompatible with our text `TOOL:` protocol. Switched Groq defaults to `qwen/qwen3.8-27b` (follows the text protocol; full pipeline verified live: critic pass, 0 revisions) |
+| 2026-10-01 | live Groq, qwen via CLI | 429 "Request too large ... OTPM Limit 1000, Requested 2048": free-tier cap on per-request output tokens. Added `LLM_MAX_TOKENS=1000` (threaded through all agents/judges) + fail-fast (no retry) for size-based 429s |
+| 2026-10-01 | live, DDG search path | `duckduckgo-search` v8 returned ZERO results for every query (silent package rot; also spammed a rename RuntimeWarning per call). Switched dependency to successor `ddgs` v9: warnings gone AND real results returned. Tavily key not needed for now |
 | TBD | live 25q × 3 configs | needs judge key for cross-family judging |

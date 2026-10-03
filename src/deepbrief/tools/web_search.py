@@ -31,9 +31,9 @@ def web_search(query: str, max_results: int = 5, cache=None, trace=None) -> list
                 )
         else:
             try:
-                from ddgs import DDGS  # duckduckgo-search v9+
+                from ddgs import DDGS  # preferred successor package (no rename warning)
             except ImportError:
-                from duckduckgo_search import DDGS  # v8 and earlier
+                from duckduckgo_search import DDGS  # legacy fallback
 
             with DDGS(timeout=15) as ddgs:
                 for r in ddgs.text(query, max_results=max_results):
