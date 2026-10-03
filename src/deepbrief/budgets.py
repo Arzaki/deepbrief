@@ -12,7 +12,7 @@ class BudgetExceeded(RuntimeError):
 
 @dataclass
 class Budgets:
-    max_llm_calls: int = 30
+    max_llm_calls: int = 40
     max_tool_calls: int = 30
     max_tokens: int = 60000
     max_wall_seconds: int = 600

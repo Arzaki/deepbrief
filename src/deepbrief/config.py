@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # reject requests whose max_tokens exceeds the limit, so keep this small.
     llm_max_tokens: int = 1000
 
-    max_llm_calls: int = 30
+    max_llm_calls: int = 40
     max_tool_calls: int = 30
     max_tokens: int = 60000
     max_wall_seconds: int = 600

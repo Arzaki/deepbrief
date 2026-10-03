@@ -197,3 +197,59 @@ def test_cache_hit_logged(tmp_path):
     assert out == [{"title": "t"}]
     assert t.totals["cache_hits"] == 1
     c.close()
+
+
+def test_researcher_search_budget_stops_flailing():
+    """Flailing model emitting endless searches: real search_fn must run at most 3 times."""
+    calls = {"n": 0}
+
+    def counting_search(q):
+        calls["n"] += 1
+        return []
+
+    llm = MockProvider(script=[f"TOOL: web_search | biplor variant {i}" for i in range(10)])
+    f, _ = run_researcher(
+        "SQ1",
+        "biplor?",
+        llm,
+        "mock-agent",
+        search_fn=counting_search,
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "x"},
+    )
+    assert calls["n"] == 3
+    assert isinstance(f.claims, list)
+
+
+def test_researcher_duplicate_query_blocked():
+    calls = []
+
+    def counting_search(q):
+        calls.append(q)
+        return [{"title": "t", "url": "http://x", "snippet": "s"}]
+
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(script=["TOOL: web_search | same query", "TOOL: web_search | same query", f"FINAL {final}"])
+    run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=counting_search,
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "x"},
+    )
+    assert calls == ["same query"]  # second identical query never reaches the tool
+
+
+def test_researcher_empty_search_returns_gracefully():
+    calls = {"n": 0}
+
+    def counting(q):
+        calls["n"] += 1
+        return []
+
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(script=["TOOL: web_search | nothing-here-xyz", f"FINAL {final}"])
+    f, _ = run_researcher(
+        "SQ1", "q?", llm, "mock-agent", search_fn=counting, fetch_fn=lambda u: {"url": u, "title": "t", "text": "x"}
+    )
+    assert calls["n"] == 1 and f.claims == []

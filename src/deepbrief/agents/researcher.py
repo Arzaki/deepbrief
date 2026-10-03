@@ -28,6 +28,7 @@ def run_researcher(
     seed: int | None = None,
     max_tokens: int = 1000,
     max_iters: int = 6,
+    max_searches: int = 3,
     search_fn=None,
     fetch_fn=None,
 ) -> tuple[Findings, dict[str, str]]:
@@ -42,21 +43,36 @@ def run_researcher(
     sources: list[Source] = []
     page_texts: dict[str, str] = {}
     sid_counter = 0
+    searches_used = 0
+    seen_queries: set[str] = set()
 
     def _tool(name: str, arg: str) -> str:
-        nonlocal sid_counter
+        nonlocal sid_counter, searches_used
         if budgets:
             budgets.register_tool()
             if trace:
                 pass
         if name == "web_search":
+            # Anti-flail rules (deterministic, no LLM needed): cap searches per
+            # sub-question and never repeat a query. Observed failure 2026-10-01:
+            # 20 near-identical searches for a typo ("biplor") burned the run budget.
+            q = arg.strip().lower()
+            if q in seen_queries:
+                return "Already searched this exact query. Do NOT search again — fetch a URL or reply FINAL JSON."
+            if searches_used >= max_searches:
+                return (
+                    f"Search budget used ({max_searches} per sub-question). "
+                    "Fetch a promising URL from the results above or reply FINAL JSON now."
+                )
+            seen_queries.add(q)
+            searches_used += 1
             res = search_fn(arg)
             lines = []
-            for r in res[:5]:
-                sid_counter += 1
-                sid = f"S{sid_counter}"
-                lines.append(f"{sid}: {r.get('title', '')} {r.get('url', '')} — {r.get('snippet', '')[:200]}")
-            return "\n".join(lines) or "no results"
+            for i, r in enumerate(res[:5], start=1):
+                lines.append(f"[{i}]: {r.get('title', '')} {r.get('url', '')} — {r.get('snippet', '')[:200]}")
+            if not lines:
+                return "0 results. Reformulate ONCE (check for typos/alternate terms), or fetch a known URL, or FINAL."
+            return "Search results (fetch by URL to get a citable S-id):\n" + "\n".join(lines)
         if name == "fetch_page":
             pg = fetch_fn(arg)
             text = strip_injection_attempts(pg.get("text", "")[:4000])
@@ -71,7 +87,9 @@ def run_researcher(
                 )
             )
             page_texts[sid] = text
-            return wrap_untrusted(text[:4000])
+            return f"Fetched [{sid}] {arg} — cite this as [{sid}] with a verbatim quote:\n" + wrap_untrusted(
+                text[:4000]
+            )
         if name == "calculator":
             return calculator(arg)
         return "ERROR: unknown tool"
