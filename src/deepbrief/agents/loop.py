@@ -20,3 +20,57 @@ def extract_json(text: str) -> str:
 
 def parse_json_strict(text: str) -> dict:
     return json.loads(extract_json(text))
+
+
+def parse_json_lenient(text: str) -> dict:
+    """Strict first; fall back to strict=False (allows literal newlines/tabs in strings).
+
+    Fixes the control-character class of model JSON errors. Cannot fix unescaped
+    double quotes inside strings — those need a retry with the error fed back.
+    """
+    raw = extract_json(text)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return json.loads(raw, strict=False)
+
+
+def complete_json_with_retry(
+    llm,
+    messages: list[dict],
+    model: str,
+    pydantic_model,
+    trace,
+    agent_name: str,
+    temperature: float = 0.0,
+    seed: int | None = None,
+    max_tokens: int = 1000,
+    retries: int = 2,
+):
+    """One LLM call returning validated JSON, with error-feedback retries.
+
+    Shared by writer/critic (planner has its own equivalent loop). Raises a clear
+    RuntimeError instead of leaking a raw JSONDecodeError after retries run out.
+    """
+    last_err = ""
+    thread = list(messages)
+    for attempt in range(retries + 1):
+        if attempt > 0:
+            thread = thread + [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Your previous reply was not valid JSON ({last_err}). "
+                        "Reply again with ONLY the JSON object: escape any double quotes "
+                        "inside strings and keep it to one object."
+                    ),
+                }
+            ]
+        resp = llm.complete(thread, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
+        if trace is not None:
+            trace.log_llm(agent_name, model, resp.input_tokens, resp.output_tokens, resp.latency_s)
+        try:
+            return pydantic_model.model_validate(parse_json_lenient(resp.text))
+        except Exception as e:  # JSON error or schema validation error: retry with feedback
+            last_err = str(e)[:300]
+    raise RuntimeError(f"{agent_name} failed to produce valid JSON after {retries + 1} attempts: {last_err}")

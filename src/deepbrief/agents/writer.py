@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..llm import BaseProvider
 from ..schemas import Findings, Report
-from .loop import parse_json_strict
+from .loop import complete_json_with_retry
 
 PROMPT = Path(__file__).resolve().parents[3] / "prompts" / "writer.md"
 
@@ -36,13 +36,15 @@ def run_writer(
     user = f"Write the report from these findings (use ONLY these claims):\n{findings_to_text(findings)}"
     if feedback:
         user += f"\n\nReviewer feedback to address:\n{feedback}"
-    resp = llm.complete(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    return complete_json_with_retry(
+        llm,
+        messages,
         model,
+        Report,
+        trace,
+        "writer",
         temperature=temperature,
         seed=seed,
         max_tokens=max_tokens,
     )
-    if trace:
-        trace.log_llm("writer", model, resp.input_tokens, resp.output_tokens, resp.latency_s)
-    return Report.model_validate(parse_json_strict(resp.text))

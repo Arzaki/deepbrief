@@ -11,7 +11,7 @@ from ..security import strip_injection_attempts, wrap_untrusted
 from ..tools.calculator import calculator
 from ..tools.fetch import fetch_page
 from ..tools.web_search import web_search
-from .loop import parse_json_strict
+from .loop import parse_json_lenient
 
 PROMPT = Path(__file__).resolve().parents[3] / "prompts" / "researcher.md"
 
@@ -154,7 +154,7 @@ def run_researcher(
             continue
         if "FINAL" in txt or txt.startswith("{"):
             try:
-                data = parse_json_strict(txt.replace("FINAL", "").strip())
+                data = parse_json_lenient(txt.replace("FINAL", "").strip())
                 data.setdefault("sub_question_id", sub_qid)
                 f = Findings.model_validate(data)
                 # attach discovered sources not already listed

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..llm import BaseProvider
 from ..schemas import Critique, Findings, Report
-from .loop import parse_json_strict
+from .loop import complete_json_with_retry
 from .writer import findings_to_text
 
 PROMPT = Path(__file__).resolve().parents[3] / "prompts" / "critic.md"
@@ -30,13 +30,15 @@ def run_critic(
         f"Draft report:\n{report.model_dump_json(indent=2)}\n\nFindings:\n{findings_to_text(findings)}\n"
         "Return Critique JSON."
     )
-    resp = llm.complete(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    return complete_json_with_retry(
+        llm,
+        messages,
         model,
+        Critique,
+        trace,
+        "critic",
         temperature=temperature,
         seed=seed,
         max_tokens=max_tokens,
     )
-    if trace:
-        trace.log_llm("critic", model, resp.input_tokens, resp.output_tokens, resp.latency_s)
-    return Critique.model_validate(parse_json_strict(resp.text))
