@@ -253,3 +253,53 @@ def test_researcher_empty_search_returns_gracefully():
         "SQ1", "q?", llm, "mock-agent", search_fn=counting, fetch_fn=lambda u: {"url": u, "title": "t", "text": "x"}
     )
     assert calls["n"] == 1 and f.claims == []
+
+
+def test_researcher_final_turn_forbids_tools():
+    """Meandering model: the last turn must carry the FINAL-only directive."""
+    from deepbrief.agents.researcher import FINAL_TURN_DIRECTIVE
+
+    script = [f"TOOL: fetch_page | http://x.com/p{i}" for i in range(6)]
+    llm = MockProvider(script=script)
+    f, pages = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        max_iters=6,
+        search_fn=lambda q: [],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "page text here"},
+    )
+    last_messages = llm.calls[-1]["messages"]
+    # NOTE: MockProvider keeps a live reference to the transcript (which grows as the
+    # final TOOL is processed), so assert membership, not position: the directive is
+    # appended immediately before the final complete() call in code order.
+    assert len(llm.calls) == 6
+    assert FINAL_TURN_DIRECTIVE in [m["content"] for m in last_messages]
+    # graceful degradation still attaches everything fetched
+    assert len(f.sources) == 6 and len(pages) == 6
+
+
+def test_researcher_evidence_nudge_after_two_fetches():
+    """After 2 fetched pages the follow-up must push FINAL instead of 'Continue'."""
+    final = json.dumps(
+        {
+            "sub_question_id": "SQ1",
+            "claims": [{"text": "episodes last weeks", "source_id": "S1", "supporting_quote": "episodes last weeks"}],
+            "sources": [{"id": "S1", "url": "http://x.com/a", "title": "t"}],
+        }
+    )
+    llm = MockProvider(
+        script=["TOOL: fetch_page | http://x.com/a", "TOOL: fetch_page | http://x.com/b", f"FINAL {final}"]
+    )
+    f, _ = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: [],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "episodes last weeks"},
+    )
+    third_call_prompt = llm.calls[2]["messages"][-1]["content"]
+    assert "enough evidence" in third_call_prompt
+    assert f.claims[0].source_id == "S1"

@@ -15,6 +15,20 @@ from .loop import parse_json_strict
 
 PROMPT = Path(__file__).resolve().parents[3] / "prompts" / "researcher.md"
 
+# Terminal pressure: the per-turn "Continue or FINAL" nudge lets models meander
+# until turns run out (observed 2026-10-01: 4 researchers × 6 turns, zero FINALs).
+# So the last turn forbids tools outright, and 2+ fetched pages flips the nudge
+# from "continue" to "write it up now".
+FINAL_TURN_DIRECTIVE = (
+    "This is your LAST research turn. Do NOT call any more tools. "
+    "Reply now with FINAL JSON Findings built from the evidence above "
+    "(an empty claims list is acceptable if nothing was supported)."
+)
+EVIDENCE_SUFFICIENT_NUDGE = (
+    "You have enough evidence (2+ fetched pages). "
+    "Reply with FINAL JSON Findings now; only call another tool for a critical gap."
+)
+
 
 def run_researcher(
     sub_qid: str,
@@ -105,9 +119,11 @@ def run_researcher(
             ),
         },
     ]
-    for _ in range(max_iters):
+    for turn in range(max_iters):
         if budgets and budgets.check():
             break
+        if turn == max_iters - 1:
+            transcript.append({"role": "user", "content": FINAL_TURN_DIRECTIVE})
         resp = llm.complete(transcript, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
         if trace:
             trace.log_llm(
@@ -131,7 +147,10 @@ def run_researcher(
             out = _tool(name, arg)
             context_blocks.append(out)
             transcript.append({"role": "assistant", "content": txt})
-            transcript.append({"role": "user", "content": f"Tool result:\n{out}\nContinue or give FINAL JSON."})
+            if len(sources) >= 2:
+                transcript.append({"role": "user", "content": f"Tool result:\n{out}\n{EVIDENCE_SUFFICIENT_NUDGE}"})
+            else:
+                transcript.append({"role": "user", "content": f"Tool result:\n{out}\nContinue or give FINAL JSON."})
             continue
         if "FINAL" in txt or txt.startswith("{"):
             try:
@@ -153,6 +172,9 @@ def run_researcher(
                 )
                 continue
         transcript.append({"role": "assistant", "content": txt})
-        transcript.append({"role": "user", "content": "Reply with TOOL: ... or FINAL JSON Findings."})
+        if len(sources) >= 2:
+            transcript.append({"role": "user", "content": EVIDENCE_SUFFICIENT_NUDGE})
+        else:
+            transcript.append({"role": "user", "content": "Reply with TOOL: ... or FINAL JSON Findings."})
     # Graceful degradation: return what we have
     return Findings(sub_question_id=sub_qid, claims=[], sources=sources), page_texts
