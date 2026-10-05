@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -20,9 +21,11 @@ class DiskCache:
         self.path = Path(path)
         self.hits = 0
         self.misses = 0
+        self._lock = threading.Lock()
         if enabled:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(str(self.path))
+            # Shared across researcher threads: allow cross-thread use, serialize with the lock.
+            self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
             self._conn.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT, ts REAL)")
             self._conn.commit()
         else:
@@ -30,26 +33,29 @@ class DiskCache:
 
     def get(self, kind: str, raw: str) -> str | None:
         if not self.enabled:
-            self.misses += 1
+            with self._lock:
+                self.misses += 1
             return None
         k = _key(kind, raw)
-        row = self._conn.execute("SELECT v, ts FROM kv WHERE k=?", (k,)).fetchone()
-        if row is None:
-            self.misses += 1
-            return None
-        v, ts = row
-        if time.time() - ts > self.ttl_s:
-            self.misses += 1
-            return None
-        self.hits += 1
-        return v
+        with self._lock:
+            row = self._conn.execute("SELECT v, ts FROM kv WHERE k=?", (k,)).fetchone()
+            if row is None:
+                self.misses += 1
+                return None
+            v, ts = row
+            if time.time() - ts > self.ttl_s:
+                self.misses += 1
+                return None
+            self.hits += 1
+            return v
 
     def put(self, kind: str, raw: str, value: str) -> None:
         if not self.enabled:
             return
         k = _key(kind, raw)
-        self._conn.execute("REPLACE INTO kv (k, v, ts) VALUES (?, ?, ?)", (k, value, time.time()))
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("REPLACE INTO kv (k, v, ts) VALUES (?, ?, ?)", (k, value, time.time()))
+            self._conn.commit()
 
     def get_json(self, kind: str, raw: str):
         v = self.get(kind, raw)

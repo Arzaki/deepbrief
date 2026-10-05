@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -26,18 +27,20 @@ class RunTrace:
             "cost_usd": 0.0,
             "cache_hits": 0,
         }
+        self._lock = threading.Lock()
 
     def log(self, kind: str, name: str, **fields: Any) -> None:
         evt = {"t": round(time.time() - self.started, 3), "kind": kind, "name": name, **fields}
-        self.events.append(evt)
-        if kind == "llm":
-            self.totals["llm_calls"] += 1
-            self.totals["tokens"] += int(fields.get("input_tokens", 0) + fields.get("output_tokens", 0))
-            self.totals["cost_usd"] += float(fields.get("cost_usd", 0.0))
-        elif kind == "tool":
-            self.totals["tool_calls"] += 1
-            if fields.get("cache_hit"):
-                self.totals["cache_hits"] += 1
+        with self._lock:
+            self.events.append(evt)
+            if kind == "llm":
+                self.totals["llm_calls"] += 1
+                self.totals["tokens"] += int(fields.get("input_tokens", 0) + fields.get("output_tokens", 0))
+                self.totals["cost_usd"] += float(fields.get("cost_usd", 0.0))
+            elif kind == "tool":
+                self.totals["tool_calls"] += 1
+                if fields.get("cache_hit"):
+                    self.totals["cache_hits"] += 1
 
     def log_llm(
         self,

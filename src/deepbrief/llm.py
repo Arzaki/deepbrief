@@ -89,11 +89,11 @@ class BaseProvider:
 class OpenAICompatibleProvider(BaseProvider):
     """Generic OpenAI-compatible chat provider (Groq, OpenAI, Gemini's OpenAI endpoint)."""
 
-    def __init__(self, api_key: str, base_url: str, name: str = "openai-compatible"):
+    def __init__(self, api_key: str, base_url: str, name: str = "openai-compatible", timeout: float = 90):
         from openai import OpenAI
 
         self.name = name
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
 
     def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=1000) -> LLMResponse:
         from openai import APIStatusError, APITimeoutError, RateLimitError
@@ -148,15 +148,16 @@ class MockProvider(BaseProvider):
     name = "mock"
 
     def __init__(self, script: list[str] | None = None):
+        import threading
+
         self.script = list(script or [])
         self.calls: list[dict] = []
+        self._lock = threading.Lock()
 
     def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=1000) -> LLMResponse:
-        self.calls.append({"messages": messages, "model": model})
-        if self.script:
-            text = self.script.pop(0)
-        else:
-            text = _mock_default_reply(messages)
+        with self._lock:
+            self.calls.append({"messages": messages, "model": model})
+            text = self.script.pop(0) if self.script else _mock_default_reply(messages)
         return LLMResponse(text=text, model=model, input_tokens=10, output_tokens=10, latency_s=0.001)
 
 
@@ -199,11 +200,15 @@ def make_provider(settings: Settings, script: list[str] | None = None) -> BasePr
     if name == "mock":
         return MockProvider(script=script)
     if name == "groq":
-        return OpenAICompatibleProvider(settings.groq_api_key, settings.groq_base_url, "groq")
+        return OpenAICompatibleProvider(settings.groq_api_key, settings.groq_base_url, "groq", settings.llm_timeout_s)
     if name == "openai":
-        return OpenAICompatibleProvider(settings.openai_api_key, "https://api.openai.com/v1", "openai")
+        return OpenAICompatibleProvider(
+            settings.openai_api_key, "https://api.openai.com/v1", "openai", settings.llm_timeout_s
+        )
     if name == "gemini":
-        return OpenAICompatibleProvider(settings.gemini_api_key, settings.gemini_base_url, "gemini")
+        return OpenAICompatibleProvider(
+            settings.gemini_api_key, settings.gemini_base_url, "gemini", settings.llm_timeout_s
+        )
     raise ValueError(f"Unknown LLM_PROVIDER={settings.llm_provider!r} (expected groq|openai|gemini|mock)")
 
 
@@ -216,5 +221,7 @@ def make_judge_provider(settings: Settings) -> BaseProvider:
         groq_api_key=settings.groq_api_key,
         openai_api_key=settings.openai_api_key,
         gemini_api_key=settings.gemini_api_key,
+        llm_timeout_s=settings.llm_timeout_s,
+        llm_max_tokens=settings.llm_max_tokens,
     )
     return make_provider(sub)

@@ -303,3 +303,32 @@ def test_researcher_evidence_nudge_after_two_fetches():
     third_call_prompt = llm.calls[2]["messages"][-1]["content"]
     assert "enough evidence" in third_call_prompt
     assert f.claims[0].source_id == "S1"
+
+
+def test_shared_sid_minter_unique_across_researchers():
+    """Without a shared namespace every researcher mints its own S1 (observed live:
+    three different pages all cited as [S1]). With mint_sid, ids stay globally unique."""
+    import itertools
+
+    counter = itertools.count(1)
+    mint = lambda: f"S{next(counter)}"  # noqa: E731
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+
+    def _run(i):
+        llm = MockProvider(
+            script=[f"TOOL: fetch_page | http://x.com/{i}a", f"TOOL: fetch_page | http://x.com/{i}b", f"FINAL {final}"]
+        )
+        return run_researcher(
+            "SQ1",
+            "q?",
+            llm,
+            "mock-agent",
+            mint_sid=mint,
+            search_fn=lambda q: [],
+            fetch_fn=lambda u: {"url": u, "title": "t", "text": "words here"},
+        )
+
+    (f1, p1), (f2, p2) = _run(1), _run(2)
+    ids = [s.id for s in f1.sources + f2.sources]
+    assert sorted(ids) == ["S1", "S2", "S3", "S4"]
+    assert set(p1) | set(p2) == set(ids)

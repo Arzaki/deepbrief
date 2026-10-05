@@ -21,13 +21,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("question")
     ap.add_argument("--mode", default="multi", choices=["baseline", "multi", "multi-no-critic"])
+    ap.add_argument(
+        "--depth",
+        default="standard",
+        choices=["quick", "standard"],
+        help="quick: fewer researcher turns, no critic (for surface-level questions)",
+    )
     args = ap.parse_args()
     s = Settings()
     cache = DiskCache(s.cache_db, enabled=s.cache_enabled)
     trace = RunTrace(
         s.trace_dir,
         s.prompt_version,
-        {"provider": s.llm_provider, "agent_model": s.resolved_agent_model()},
+        {"provider": s.llm_provider, "agent_model": s.resolved_agent_model(), "depth": args.depth},
     )
     llm = make_provider(s)
     budgets = Budgets(s.max_llm_calls, s.max_tool_calls, s.max_tokens, s.max_wall_seconds)
@@ -42,6 +48,7 @@ def main():
             s.temperature,
             s.seed,
             max_tokens=s.llm_max_tokens,
+            depth=args.depth,
         )
     else:
         out = run_pipeline(
@@ -56,6 +63,8 @@ def main():
             s.seed,
             use_critic=(args.mode == "multi"),
             max_tokens=s.llm_max_tokens,
+            depth=args.depth,
+            max_workers=s.research_workers,
         )
     tp = trace.save()
     print(out["markdown"])

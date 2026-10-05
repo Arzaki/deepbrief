@@ -29,6 +29,8 @@ uv run pytest -q
 uv run ruff check .
 # one run (multi-agent with critic)
 uv run python -m deepbrief.cli "Compare vector databases for a startup with ~1M documents" --mode multi
+# same, but fast: parallel researchers, fewer turns, no critic (for surface-level questions)
+uv run python -m deepbrief.cli "LDAC vs LHDC" --mode multi --depth quick
 # evals (offline, no keys)
 uv run python evals/run_evals.py --offline --configs baseline,multi-no-critic,multi-critic
 # UI
@@ -41,6 +43,7 @@ Provider/model selection is env-driven (`LLM_PROVIDER`, `AGENT_MODEL`, `CHEAP_MO
 
 - **Plain-Python orchestration, no LangChain/LangGraph**: the tool loop and state machine are ~100 lines each, explainable line-by-line in an interview; fewer hidden prompts/retries.
 - **Bounded critic (max 2 revisions)**: prevents loops and runaway cost; `revision_cap_reached(2)` is recorded in the trace.
+- **Parallel researchers + quick mode**: sub-questions are independent, so researchers run in a thread pool (`RESEARCH_WORKERS=3`; budgets/cache/trace are lock-guarded). `--depth quick` (also a UI toggle, default) halves researcher turns and skips the critic for surface-level questions; `standard` keeps the full treatment.
 - **Programmatic citation verification** (`verify.py`): deterministic quote-in-page check (normalized verbatim + fuzzy ≥0.85) complements the LLM entailment judge, which can itself hallucinate.
 - **Budgets per run** (LLM calls, tool calls, tokens, wall seconds): abort gracefully with partial result + reason.
 - **Thin provider abstraction** over OpenAI-compatible APIs: Groq default, Gemini/OpenAI swappable via env; Mock provider for tests/offline CI.

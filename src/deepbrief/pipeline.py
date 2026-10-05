@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import itertools
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from .agents.critic import run_critic
 from .agents.planner import run_planner
@@ -29,10 +32,18 @@ def run_pipeline(
     max_revisions: int = 2,
     search_fn=None,
     fetch_fn=None,
+    depth: str = "standard",
+    max_workers: int = 3,
 ) -> dict:
     budgets = budgets or Budgets()
     budgets.start()
     cheap_model = cheap_model or model
+    # Quick mode for surface-level questions: fewer researcher turns, no critic.
+    # Same plan shape and budgets; just a cheaper gear for simple questions.
+    quick = depth == "quick"
+    r_iters = 3 if quick else 6
+    if quick:
+        use_critic = False
     t0 = time.time()
     abort_reason = ""
     plan = run_planner(
@@ -41,11 +52,19 @@ def run_pipeline(
     budgets.register_llm(50)  # planner accounting approximated via trace; keep counter moving
     all_findings = []
     page_texts: dict[str, str] = {}
-    for sq in plan.sub_questions:
+    # One shared source-id namespace: per-researcher S1..Sn counters collide when
+    # findings merge (observed: three different pages all listed as [S1]).
+    _sid_counter = itertools.count(1)
+    _sid_lock = threading.Lock()
+
+    def _mint_sid() -> str:
+        with _sid_lock:
+            return f"S{next(_sid_counter)}"
+
+    def _research(sq) -> tuple | None:
         if budgets.check():
-            abort_reason = budgets.check() or ""
-            break
-        f, pages = run_researcher(
+            return None
+        return run_researcher(
             sq.id,
             sq.text,
             llm,
@@ -56,9 +75,23 @@ def run_pipeline(
             temperature=temperature,
             seed=seed,
             max_tokens=max_tokens,
+            max_iters=r_iters,
             search_fn=search_fn,
             fetch_fn=fetch_fn,
+            mint_sid=_mint_sid,
         )
+
+    if max_workers <= 1:
+        results = [_research(sq) for sq in plan.sub_questions]
+    else:
+        # Sub-questions are independent; budgets/cache/trace/LLM client are all thread-safe.
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(pool.map(_research, plan.sub_questions))
+    for res in results:
+        if res is None:
+            abort_reason = budgets.check() or ""
+            break
+        f, pages = res
         all_findings.append(f)
         page_texts.update(pages)
     feedback = ""

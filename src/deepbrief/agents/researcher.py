@@ -45,8 +45,14 @@ def run_researcher(
     max_searches: int = 3,
     search_fn=None,
     fetch_fn=None,
+    mint_sid=None,
 ) -> tuple[Findings, dict[str, str]]:
-    """Returns (findings, page_texts). search_fn/fetch_fn injectable for tests."""
+    """Returns (findings, page_texts). search_fn/fetch_fn injectable for tests.
+
+    mint_sid: optional shared () -> str ID minter. The pipeline passes one shared
+    across researchers so source ids are globally unique; without it each call
+    mints its own S1..Sn namespace (fine standalone, colliding when merged).
+    """
     search_fn = search_fn or (lambda q: web_search(q, cache=cache, trace=trace))
     fetch_fn = fetch_fn or (lambda u: fetch_page(u, cache=cache, trace=trace))
     try:
@@ -56,12 +62,20 @@ def run_researcher(
     context_blocks: list[str] = []
     sources: list[Source] = []
     page_texts: dict[str, str] = {}
-    sid_counter = 0
+    _local_sid = 0
+
+    def _mint() -> str:
+        nonlocal _local_sid
+        if mint_sid is not None:
+            return mint_sid()
+        _local_sid += 1
+        return f"S{_local_sid}"
+
     searches_used = 0
     seen_queries: set[str] = set()
 
     def _tool(name: str, arg: str) -> str:
-        nonlocal sid_counter, searches_used
+        nonlocal searches_used
         if budgets:
             budgets.register_tool()
             if trace:
@@ -90,8 +104,7 @@ def run_researcher(
         if name == "fetch_page":
             pg = fetch_fn(arg)
             text = strip_injection_attempts(pg.get("text", "")[:4000])
-            sid_counter += 1
-            sid = f"S{sid_counter}"
+            sid = _mint()
             sources.append(
                 Source(
                     id=sid,

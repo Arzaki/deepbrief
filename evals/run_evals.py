@@ -91,6 +91,7 @@ def run_one(question: dict, config: str, settings: Settings, cache, judge, judge
             use_critic=False,
             max_revisions=settings.max_revisions,
             max_tokens=settings.llm_max_tokens,
+            max_workers=settings.research_workers,
             **stubs,
         )
         findings_claims = [
@@ -112,6 +113,7 @@ def run_one(question: dict, config: str, settings: Settings, cache, judge, judge
             use_critic=True,
             max_revisions=settings.max_revisions,
             max_tokens=settings.llm_max_tokens,
+            max_workers=settings.research_workers,
             **stubs,
         )
         findings_claims = [

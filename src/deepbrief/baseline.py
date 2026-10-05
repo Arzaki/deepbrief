@@ -44,9 +44,12 @@ def run_baseline(
     max_iters: int = 10,
     search_fn=None,
     fetch_fn=None,
+    depth: str = "standard",
 ) -> dict:
     budgets = budgets or Budgets()
     budgets.start()
+    if depth == "quick":
+        max_iters = min(max_iters, 4)
     search_fn = search_fn or (lambda q: web_search(q, cache=cache, trace=trace))
     fetch_fn = fetch_fn or (lambda u: fetch_page(u, cache=cache, trace=trace))
     try:

@@ -35,7 +35,7 @@ def linkify_citations(md: str, url_map: dict[str, str]) -> str:
     return re.sub(r"\[(\w\d+)\]", _repl, md)
 
 
-def run_fn(question: str, mode: str, session: str, progress: gr.Progress | None = None):
+def run_fn(question: str, mode: str, depth: str, session: str, progress: gr.Progress | None = None):
     progress = progress or gr.Progress()
     if not question.strip():
         return "Please enter a question.", "", ""
@@ -48,7 +48,7 @@ def run_fn(question: str, mode: str, session: str, progress: gr.Progress | None 
     trace = RunTrace(
         s.trace_dir,
         s.prompt_version,
-        {"provider": s.llm_provider, "agent_model": s.resolved_agent_model(), "mode": mode},
+        {"provider": s.llm_provider, "agent_model": s.resolved_agent_model(), "mode": mode, "depth": depth},
     )
     llm = make_provider(s)
     budgets = Budgets(s.max_llm_calls, s.max_tool_calls, s.max_tokens, s.max_wall_seconds)
@@ -66,6 +66,7 @@ def run_fn(question: str, mode: str, session: str, progress: gr.Progress | None 
                 s.temperature,
                 s.seed,
                 max_tokens=s.llm_max_tokens,
+                depth=depth,
             )
             url_map = {}
         else:
@@ -82,6 +83,8 @@ def run_fn(question: str, mode: str, session: str, progress: gr.Progress | None 
                 s.seed,
                 use_critic=(mode == "multi-critic"),
                 max_tokens=s.llm_max_tokens,
+                depth=depth,
+                max_workers=s.research_workers,
             )
             url_map = {src.id: src.url for f in out.get("findings", []) for src in f.sources}
             progress(0.9, desc="Writing + critiquing...")
@@ -115,12 +118,17 @@ with gr.Blocks(title="DeepBrief") as demo:
         placeholder="Compare vector databases for a startup with ~1M documents",
     )
     mode = gr.Radio(["baseline", "multi-no-critic", "multi-critic"], value="multi-critic", label="Mode")
+    depth = gr.Radio(
+        ["quick", "standard"],
+        value="quick",
+        label="Depth (quick: fewer turns, no critic — for surface-level questions)",
+    )
     session = gr.Textbox(label="Session id (rate-limit key)", value="demo")
     btn = gr.Button("Run research")
     report = gr.Markdown(label="Report")
     stats = gr.Textbox(label="Cost / latency")
     trace_view = gr.Code(label="Trace (JSON)", language="json")
-    btn.click(run_fn, inputs=[q, mode, session], outputs=[report, stats, trace_view])
+    btn.click(run_fn, inputs=[q, mode, depth, session], outputs=[report, stats, trace_view])
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860)

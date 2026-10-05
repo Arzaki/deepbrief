@@ -113,3 +113,51 @@ def test_mock_provider():
     m = MockProvider(script=['{"verdict": "pass", "issues": []}'])
     r = m.complete([{"role": "user", "content": "hi"}], "mock-agent")
     assert "pass" in r.text
+
+
+def test_budgets_thread_safe():
+    from concurrent.futures import ThreadPoolExecutor
+
+    from deepbrief.budgets import Budgets
+
+    b = Budgets(max_llm_calls=10000, max_tool_calls=10000, max_tokens=10**9, max_wall_seconds=60)
+    b.start()
+
+    def work(_):
+        for _ in range(100):
+            b.register_llm(5)
+            b.register_tool()
+            b.check()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(work, range(8)))
+    assert b.llm_calls == 800 and b.tool_calls == 800 and b.tokens == 4000
+
+
+def test_trace_thread_safe(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    t = RunTrace(str(tmp_path), "v1", {})
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda i: t.log_llm("agent", "mock-agent", 10, 5, 0.01), range(200)))
+    assert t.totals["llm_calls"] == 200 and t.totals["tokens"] == 3000 and len(t.events) == 200
+
+
+def test_cache_thread_safe(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    c = DiskCache(str(tmp_path / "t.sqlite"), enabled=True)
+
+    def work(i):
+        c.put("k", f"q{i % 10}", f"v{i}")
+        return c.get("k", f"q{i % 10}")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        out = list(pool.map(work, range(200)))
+    assert all(v is not None and v.startswith("v") for v in out)
+    c.close()
+
+
+def test_settings_speed_defaults():
+    s = Settings()
+    assert s.research_workers == 3 and s.llm_timeout_s == 90 and s.llm_max_tokens == 1000

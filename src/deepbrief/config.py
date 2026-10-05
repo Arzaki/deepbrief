@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Per-request output cap. Free-tier plans (e.g. Groq on_demand OTPM 1000)
     # reject requests whose max_tokens exceeds the limit, so keep this small.
     llm_max_tokens: int = 1000
+    # Seconds before a single LLM HTTP request gives up (then retried with backoff).
+    llm_timeout_s: int = 90
+    # Researcher threads for the multi-agent pipeline (sub-questions are independent).
+    research_workers: int = 3
 
     max_llm_calls: int = 40
     max_tool_calls: int = 30
