@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     # reject requests whose max_tokens exceeds the limit, so keep this small.
     llm_max_tokens: int = 1000
     # Seconds before a single LLM HTTP request gives up (then retried with backoff).
-    llm_timeout_s: int = 90
+    # Healthy tier answers in ~5s; 30s bounds stalls without punishing slow-but-alive calls.
+    llm_timeout_s: int = 30
     # Researcher threads for the multi-agent pipeline (sub-questions are independent).
     research_workers: int = 3
 

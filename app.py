@@ -98,7 +98,12 @@ def run_fn(question: str, mode: str, depth: str, session: str, progress: gr.Prog
                 "Run `uv run python scripts/check_models.py` to list live IDs, then set "
                 "`AGENT_MODEL` / `CHEAP_MODEL` in `.env` to a listed one."
             )
-        return f"Run failed after {elapsed}s: {msg}{hint}", "error", ""
+        tp = trace.save()  # partial trace: diagnosis survives even failed runs
+        stats = (
+            f"FAILED after {elapsed}s | llm {trace.totals['llm_calls']} | "
+            f"tools {trace.totals['tool_calls']} | tokens {trace.totals['tokens']}"
+        )
+        return f"Run failed after {elapsed}s: {msg}{hint}", f"{stats}\n\nPartial trace: {tp}", ""
     tp = trace.save()
     elapsed = round(time.time() - t0, 1)
     stats = (

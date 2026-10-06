@@ -50,6 +50,13 @@ class ReportSection(BaseModel):
     body: str
 
 
+class ReportHead(BaseModel):
+    """Title + summary written in one call so sections can be written in parallel calls."""
+
+    title: str
+    summary: str
+
+
 class Report(BaseModel):
     title: str
     summary: str

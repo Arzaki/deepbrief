@@ -17,6 +17,21 @@ from .llm import BaseProvider
 from .verify import verify_findings
 
 
+def _checkpoint(trace, stage: str) -> None:
+    """Re-save the growing trace at stage boundaries.
+
+    trace.save() always writes the same run_<id>.json, so this is cheap. A run
+    killed mid-flight (timeout, Ctrl+C) still leaves everything up to the last
+    completed stage for diagnosis — previously such runs left nothing at all.
+    """
+    if trace is None:
+        return
+    try:
+        trace.save()
+    except Exception:
+        pass  # checkpointing must never break the run itself
+
+
 def run_pipeline(
     question: str,
     llm: BaseProvider,
@@ -34,6 +49,7 @@ def run_pipeline(
     fetch_fn=None,
     depth: str = "standard",
     max_workers: int = 3,
+    verbose: bool = False,
 ) -> dict:
     budgets = budgets or Budgets()
     budgets.start()
@@ -50,6 +66,8 @@ def run_pipeline(
         question, llm, cheap_model, trace=trace, temperature=temperature, seed=seed, max_tokens=max_tokens
     )
     budgets.register_llm(50)  # planner accounting approximated via trace; keep counter moving
+    if verbose:
+        print(f"[plan] {len(plan.sub_questions)} sub-questions", flush=True)
     all_findings = []
     page_texts: dict[str, str] = {}
     # One shared source-id namespace: per-researcher S1..Sn counters collide when
@@ -94,6 +112,13 @@ def run_pipeline(
         f, pages = res
         all_findings.append(f)
         page_texts.update(pages)
+    if verbose:
+        n_claims = sum(len(f.claims) for f in all_findings)
+        print(
+            f"[research done] {len(all_findings)} findings, {n_claims} claims. abort={abort_reason or 'none'}",
+            flush=True,
+        )
+    _checkpoint(trace, "research done")
     feedback = ""
     report = None
     critique = None
@@ -111,8 +136,12 @@ def run_pipeline(
             seed=seed,
             max_tokens=max_tokens,
             feedback=feedback,
+            max_workers=max_workers,
         )
         budgets.register_llm(100)
+        if verbose:
+            print(f"[writer] round {rounds}: {len(report.sections)} sections", flush=True)
+        _checkpoint(trace, f"writer round {rounds}")
         if not use_critic:
             break
         critique = run_critic(
@@ -126,6 +155,8 @@ def run_pipeline(
             max_tokens=max_tokens,
         )
         budgets.register_llm(50)
+        if verbose:
+            print(f"[critic] verdict={critique.verdict} issues={len(critique.issues)}", flush=True)
         if critique.verdict == "pass" or rounds >= max_revisions:
             if rounds >= max_revisions and critique.verdict == "revise":
                 abort_reason = "revision_cap_reached(2)"

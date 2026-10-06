@@ -37,6 +37,22 @@ def main():
     )
     llm = make_provider(s)
     budgets = Budgets(s.max_llm_calls, s.max_tool_calls, s.max_tokens, s.max_wall_seconds)
+    try:
+        out = _run(args, s, llm, budgets, cache, trace)
+    except BaseException as e:  # noqa: BLE001 — always persist a partial trace for diagnosis
+        tp = trace.save()
+        print(
+            f"\n[FAILED after {trace.totals['llm_calls']} llm / {trace.totals['tool_calls']} tool calls: "
+            f"{type(e).__name__}: {e}]"
+        )
+        print(f"[partial trace saved: {tp}]")
+        raise SystemExit(1) from e
+    tp = trace.save()
+    print(out["markdown"])
+    print(f"\n[trace: {tp} | cost ${trace.totals['cost_usd']:.5f} | tokens {trace.totals['tokens']}]")
+
+
+def _run(args, s, llm, budgets, cache, trace):
     if args.mode == "baseline":
         out = run_baseline(
             args.question,
@@ -65,10 +81,9 @@ def main():
             max_tokens=s.llm_max_tokens,
             depth=args.depth,
             max_workers=s.research_workers,
+            verbose=True,
         )
-    tp = trace.save()
-    print(out["markdown"])
-    print(f"\n[trace: {tp} | cost ${trace.totals['cost_usd']:.5f} | tokens {trace.totals['tokens']}]")
+    return out
 
 
 if __name__ == "__main__":

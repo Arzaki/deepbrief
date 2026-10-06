@@ -280,8 +280,8 @@ def test_researcher_final_turn_forbids_tools():
     assert len(f.sources) == 6 and len(pages) == 6
 
 
-def test_researcher_evidence_nudge_after_two_fetches():
-    """After 2 fetched pages the follow-up must push FINAL instead of 'Continue'."""
+def test_researcher_no_nudge_before_three_fetches():
+    """After only 2 fetched pages the follow-up must still allow continuing."""
     final = json.dumps(
         {
             "sub_question_id": "SQ1",
@@ -301,8 +301,73 @@ def test_researcher_evidence_nudge_after_two_fetches():
         fetch_fn=lambda u: {"url": u, "title": "t", "text": "episodes last weeks"},
     )
     third_call_prompt = llm.calls[2]["messages"][-1]["content"]
-    assert "enough evidence" in third_call_prompt
+    assert "enough evidence" not in third_call_prompt  # only 2 pages: keep researching
+    assert "Continue" in third_call_prompt
     assert f.claims[0].source_id == "S1"
+
+
+def test_researcher_evidence_nudge_after_three_fetches():
+    final = json.dumps(
+        {
+            "sub_question_id": "SQ1",
+            "claims": [{"text": "c", "source_id": "S1", "supporting_quote": "c"}],
+            "sources": [{"id": "S1", "url": "http://x.com/a", "title": "t"}],
+        }
+    )
+    llm = MockProvider(
+        script=[
+            "TOOL: fetch_page | http://x.com/a",
+            "TOOL: fetch_page | http://x.com/b",
+            "TOOL: fetch_page | http://x.com/c",
+            f"FINAL {final}",
+        ]
+    )
+    f, pages = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: [],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "c"},
+    )
+    fourth_call_prompt = llm.calls[3]["messages"][-1]["content"]
+    assert "enough evidence" in fourth_call_prompt
+    assert sorted(pages) == ["S1", "S2", "S3"]
+
+
+def test_researcher_batch_fetch_pages():
+    """One fetch_pages turn fetches up to 3 URLs with distinct SIDs."""
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(script=["TOOL: fetch_pages | http://x.com/a, http://x.com/b", f"FINAL {final}"])
+    f, pages = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: [],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": f"text of {u}"},
+    )
+    assert sorted(pages) == ["S1", "S2"]
+    assert [s.url for s in f.sources] == ["http://x.com/a", "http://x.com/b"]
+    assert "text of http://x.com/b" in pages["S2"]
+
+
+def test_researcher_batch_fetch_caps_at_three_urls():
+    seen = []
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(
+        script=["TOOL: fetch_pages | http://x.com/1 http://x.com/2 http://x.com/3 http://x.com/4", f"FINAL {final}"]
+    )
+    f, pages = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: [],
+        fetch_fn=lambda u: (seen.append(u), {"url": u, "title": "t", "text": "x"})[1],
+    )
+    assert seen == ["http://x.com/1", "http://x.com/2", "http://x.com/3"]
+    assert len(pages) == 3
 
 
 def test_shared_sid_minter_unique_across_researchers():

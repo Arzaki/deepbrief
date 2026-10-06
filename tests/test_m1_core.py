@@ -160,4 +160,4 @@ def test_cache_thread_safe(tmp_path):
 
 def test_settings_speed_defaults():
     s = Settings()
-    assert s.research_workers == 3 and s.llm_timeout_s == 90 and s.llm_max_tokens == 1000
+    assert s.research_workers == 3 and s.llm_timeout_s == 30 and s.llm_max_tokens == 1000

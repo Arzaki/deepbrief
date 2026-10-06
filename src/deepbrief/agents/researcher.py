@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,7 +26,7 @@ FINAL_TURN_DIRECTIVE = (
     "(an empty claims list is acceptable if nothing was supported)."
 )
 EVIDENCE_SUFFICIENT_NUDGE = (
-    "You have enough evidence (2+ fetched pages). "
+    "You have enough evidence (3+ fetched pages). "
     "Reply with FINAL JSON Findings now; only call another tool for a critical gap."
 )
 
@@ -101,22 +102,41 @@ def run_researcher(
             if not lines:
                 return "0 results. Reformulate ONCE (check for typos/alternate terms), or fetch a known URL, or FINAL."
             return "Search results (fetch by URL to get a citable S-id):\n" + "\n".join(lines)
-        if name == "fetch_page":
-            pg = fetch_fn(arg)
-            text = strip_injection_attempts(pg.get("text", "")[:4000])
-            sid = _mint()
-            sources.append(
-                Source(
-                    id=sid,
-                    url=arg,
-                    title=pg.get("title", ""),
-                    fetched_at=datetime.now(UTC).isoformat(),
+        if name in ("fetch_page", "fetch_pages"):
+            # Batch form fetches up to 3 URLs concurrently in ONE turn, so depth
+            # doesn't cost extra researcher turns (fetches are free, only time).
+            # URLs are whitespace-separated (trailing commas tolerated); embedded
+            # commas inside a URL are preserved.
+            toks = [t.strip().strip(",;") for t in arg.split()]
+            urls = [t for t in toks if t.startswith("http")]
+            urls = urls[:1] if name == "fetch_page" else urls[:3]
+            if not urls:
+                return "ERROR: no valid http(s) URL found. Provide full URLs to fetch."
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                fetched = list(pool.map(fetch_fn, urls))
+            blocks = []
+            for url, pg in zip(urls, fetched, strict=True):
+                pg = pg or {}
+                err = pg.get("error", "")
+                text = strip_injection_attempts((pg.get("text", "") or "")[:4000])
+                sid = _mint()
+                sources.append(
+                    Source(
+                        id=sid,
+                        url=url,
+                        title=pg.get("title", ""),
+                        fetched_at=datetime.now(UTC).isoformat(),
+                    )
                 )
-            )
-            page_texts[sid] = text
-            return f"Fetched [{sid}] {arg} — cite this as [{sid}] with a verbatim quote:\n" + wrap_untrusted(
-                text[:4000]
-            )
+                page_texts[sid] = text
+                if text:
+                    blocks.append(
+                        f"Fetched [{sid}] {url} — cite this as [{sid}] with a verbatim quote:\n"
+                        + wrap_untrusted(text[:4000])
+                    )
+                else:
+                    blocks.append(f"Fetched [{sid}] {url} — EMPTY or failed ({err[:150]}). Try another URL.")
+            return "\n\n".join(blocks)
         if name == "calculator":
             return calculator(arg)
         return "ERROR: unknown tool"
@@ -160,7 +180,7 @@ def run_researcher(
             out = _tool(name, arg)
             context_blocks.append(out)
             transcript.append({"role": "assistant", "content": txt})
-            if len(sources) >= 2:
+            if len(sources) >= 3:
                 transcript.append({"role": "user", "content": f"Tool result:\n{out}\n{EVIDENCE_SUFFICIENT_NUDGE}"})
             else:
                 transcript.append({"role": "user", "content": f"Tool result:\n{out}\nContinue or give FINAL JSON."})
@@ -185,7 +205,7 @@ def run_researcher(
                 )
                 continue
         transcript.append({"role": "assistant", "content": txt})
-        if len(sources) >= 2:
+        if len(sources) >= 3:
             transcript.append({"role": "user", "content": EVIDENCE_SUFFICIENT_NUDGE})
         else:
             transcript.append({"role": "user", "content": "Reply with TOOL: ... or FINAL JSON Findings."})
