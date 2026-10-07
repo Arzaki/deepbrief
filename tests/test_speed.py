@@ -32,6 +32,7 @@ def test_pipeline_parallel_workers_complete():
     assert len(out["findings"]) == 3
     assert out["report"].title == "T"
     assert out["critique"].verdict == "pass"
+    assert isinstance(out.get("page_texts"), dict)
 
 
 def test_pipeline_quick_skips_critic_and_limits_turns():

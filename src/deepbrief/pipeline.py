@@ -302,6 +302,7 @@ def run_pipeline(
         "markdown": md,
         "plan": plan,
         "findings": all_findings,
+        "page_texts": page_texts,
         "critique": critique,
         "revision_rounds": rounds,
         "citation_flags": flags,

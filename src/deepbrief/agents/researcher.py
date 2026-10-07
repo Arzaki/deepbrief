@@ -187,6 +187,7 @@ def run_researcher(
                 resp.output_tokens,
                 resp.latency_s,
                 sub_question=sub_qid,
+                excerpt=resp.text[:200],
             )
         if budgets:
             budgets.register_llm(resp.input_tokens + resp.output_tokens)
@@ -213,10 +214,11 @@ def run_researcher(
                 data.setdefault("sub_question_id", sub_qid)
                 f = Findings.model_validate(data)
                 # No-fetch FINAL with un-fetched results on the table: send the model
-                # back once to fetch (observed 2026-10-01: searches without a single
-                # fetch → empty findings → zero-coverage report). Genuinely empty
-                # searches may still finalize empty.
-                if not sources and not f.sources and saw_results and not fetch_forced_once:
+                # back once to fetch (observed 2026-10-01 twice: searches without a
+                # single fetch → empty findings → zero-coverage report; the second
+                # time the model even listed fabricated sources, so only ACTUAL
+                # fetches count here, not model-declared source entries).
+                if not sources and saw_results and not fetch_forced_once:
                     fetch_forced_once = True
                     transcript.append(
                         {

@@ -109,7 +109,11 @@ def run_one(
             **stubs,
         )
         findings_claims = [
-            {"text": c.text, "supporting_quote": c.supporting_quote, "page_text": ""}
+            {
+                "text": c.text,
+                "supporting_quote": c.supporting_quote,
+                "page_text": out.get("page_texts", {}).get(c.source_id, ""),
+            }
             for f in out["findings"]
             for c in f.claims
         ]
@@ -133,7 +137,11 @@ def run_one(
             **stubs,
         )
         findings_claims = [
-            {"text": c.text, "supporting_quote": c.supporting_quote, "page_text": ""}
+            {
+                "text": c.text,
+                "supporting_quote": c.supporting_quote,
+                "page_text": out.get("page_texts", {}).get(c.source_id, ""),
+            }
             for f in out["findings"]
             for c in f.claims
         ]

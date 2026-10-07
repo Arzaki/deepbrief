@@ -395,6 +395,33 @@ def test_researcher_empty_final_after_results_forces_one_fetch():
     assert sorted(pages) == ["S1"] and f.claims == []
 
 
+def test_researcher_fabricated_sources_do_not_bypass_fetch_gate():
+    """Model-declared source entries without actual fetches must NOT satisfy the gate."""
+    fab = json.dumps(
+        {"sub_question_id": "SQ1", "claims": [], "sources": [{"id": "S99", "url": "http://made.up/x", "title": "fake"}]}
+    )
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(
+        script=[
+            "TOOL: web_search | vector db",
+            f"FINAL {fab}",
+            "TOOL: fetch_page | http://hit.test/a",
+            f"FINAL {final}",
+        ]
+    )
+    fetched = []
+    f, pages = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: [{"title": "t", "url": "http://hit.test/a", "snippet": "s"}],
+        fetch_fn=lambda u: (fetched.append(u), {"url": u, "title": "t", "text": "x"})[1],
+    )
+    assert fetched == ["http://hit.test/a"]
+    assert sorted(pages) == ["S1"]
+
+
 def test_researcher_empty_final_without_results_accepted():
     """Searches came back empty: empty FINAL goes through with no forced fetch."""
     calls = {"n": 0}

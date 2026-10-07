@@ -1,0 +1,5 @@
+id,config,depth,error,coverage,citation_accuracy,faithfulness,supported,partial,unsupported,latency_s,tokens,cost_usd,llm_calls,tool_calls,trace
+q02,multi-critic,quick,,0.0,0.0,0.0,0,0,0,32.33,11336,0.012297,14,4,traces\run_cb2dd60a0526.json
+q03,multi-critic,quick,,0.0,0.0,0.0,0,0,6,116.27,14586,0.017913,15,8,traces\run_13c3dc60308c.json
+q06,multi-critic,quick,,0.75,0.0,0.0,0,0,10,150.79,15748,0.01984,15,5,traces\run_4f406eb74b3d.json
+q13,multi-critic,quick,,1.0,0.0,0.0,0,0,13,210.46,18701,0.027786,13,9,traces\run_7eedd862cc16.json
