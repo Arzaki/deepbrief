@@ -35,6 +35,24 @@ def parse_json_lenient(text: str) -> dict:
         return json.loads(raw, strict=False)
 
 
+def retry_logger(trace, agent_name: str):
+    """Build an on_retry callback logging otherwise-invisible backoff stalls."""
+    if trace is None:
+        return None
+
+    def _log(exc, wait_s: float, attempt: int) -> None:
+        trace.log(
+            "llm_retry",
+            agent_name,
+            status=getattr(exc, "status", None),
+            error=str(exc)[:200],
+            wait_s=round(wait_s, 2),
+            attempt=attempt,
+        )
+
+    return _log
+
+
 def complete_json_with_retry(
     llm,
     messages: list[dict],
@@ -46,6 +64,7 @@ def complete_json_with_retry(
     seed: int | None = None,
     max_tokens: int = 1000,
     retries: int = 2,
+    on_retry=None,
 ):
     """One LLM call returning validated JSON, with error-feedback retries.
 
@@ -66,7 +85,7 @@ def complete_json_with_retry(
                     ),
                 }
             ]
-        resp = llm.complete(thread, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
+        resp = llm.complete(thread, model, temperature=temperature, seed=seed, max_tokens=max_tokens, on_retry=on_retry)
         if trace is not None:
             trace.log_llm(agent_name, model, resp.input_tokens, resp.output_tokens, resp.latency_s)
         try:

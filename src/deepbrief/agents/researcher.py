@@ -12,7 +12,7 @@ from ..security import strip_injection_attempts, wrap_untrusted
 from ..tools.calculator import calculator
 from ..tools.fetch import fetch_page
 from ..tools.web_search import web_search
-from .loop import parse_json_lenient
+from .loop import parse_json_lenient, retry_logger
 
 PROMPT = Path(__file__).resolve().parents[3] / "prompts" / "researcher.md"
 
@@ -167,7 +167,14 @@ def run_researcher(
             break
         if turn == max_iters - 1:
             transcript.append({"role": "user", "content": FINAL_TURN_DIRECTIVE})
-        resp = llm.complete(transcript, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
+        resp = llm.complete(
+            transcript,
+            model,
+            temperature=temperature,
+            seed=seed,
+            max_tokens=max_tokens,
+            on_retry=retry_logger(trace, "researcher"),
+        )
         if trace:
             trace.log_llm(
                 "researcher",

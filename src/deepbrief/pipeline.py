@@ -143,6 +143,7 @@ def run_pipeline(
         print(f"[plan] {len(plan.sub_questions)} sub-questions", flush=True)
     all_findings = []
     page_texts: dict[str, str] = {}
+    notes: list[str] = []
     # One shared source-id namespace: per-researcher S1..Sn counters collide when
     # findings merge (observed: three different pages all listed as [S1]).
     _sid_counter = itertools.count(1)
@@ -155,22 +156,28 @@ def run_pipeline(
     def _research(sq) -> tuple | None:
         if budgets.check():
             return None
-        return run_researcher(
-            sq.id,
-            sq.text,
-            llm,
-            model,
-            budgets=budgets,
-            cache=cache,
-            trace=trace,
-            temperature=temperature,
-            seed=seed,
-            max_tokens=max_tokens,
-            max_iters=r_iters,
-            search_fn=search_fn,
-            fetch_fn=fetch_fn,
-            mint_sid=_mint_sid,
-        )
+        try:
+            return run_researcher(
+                sq.id,
+                sq.text,
+                llm,
+                model,
+                budgets=budgets,
+                cache=cache,
+                trace=trace,
+                temperature=temperature,
+                seed=seed,
+                max_tokens=max_tokens,
+                max_iters=r_iters,
+                search_fn=search_fn,
+                fetch_fn=fetch_fn,
+                mint_sid=_mint_sid,
+            )
+        except Exception as e:  # noqa: BLE001 — quota/network death becomes partial, not a dead run
+            notes.append(f"{sq.id}:{type(e).__name__}")
+            if verbose:
+                print(f"[research error] {sq.id}: {type(e).__name__}: {str(e)[:150]}", flush=True)
+            return None
 
     if max_workers <= 1:
         results = [_research(sq) for sq in plan.sub_questions]
@@ -204,6 +211,9 @@ def run_pipeline(
         f, pages = res
         all_findings.append(f)
         page_texts.update(pages)
+    if notes:
+        extra = "; ".join(notes)
+        abort_reason = f"{abort_reason}; {extra}" if abort_reason else extra
     if partial and not abort_reason:
         abort_reason = budgets.check() or "partial_researcher_results"
     if verbose:

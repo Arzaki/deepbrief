@@ -40,11 +40,20 @@ def test_writer_recovers_after_one_malformed_reply():
     assert len(llm.calls) == 2  # initial + 1 feedback retry
 
 
-def test_writer_raises_clear_error_after_retries_exhausted():
+def test_writer_falls_back_after_retries_exhausted():
+    """Spec change: persistent model failure now yields a deterministic cited
+    fallback (faithfulness holds — only researcher claims listed), not a crash."""
+    from deepbrief.agents.writer import _run_writer_llm
+
     llm = MockProvider(script=["garbage {{"] * 5)
+    findings = [Findings(sub_question_id="SQ1", claims=[], sources=[])]
     with pytest.raises(RuntimeError, match="writer failed to produce valid JSON"):
-        run_writer([Findings(sub_question_id="SQ1", claims=[], sources=[])], llm, "mock-agent")
+        _run_writer_llm(findings, llm, "mock-agent")
     assert len(llm.calls) == 3  # initial + 2 retries, then give up (no infinite loop)
+
+    llm2 = MockProvider(script=["garbage {{"] * 5)
+    rep = run_writer(findings, llm2, "mock-agent")
+    assert "without LLM" in rep.title
 
 
 def test_critic_recovers_after_malformed_reply():
@@ -53,3 +62,30 @@ def test_critic_recovers_after_malformed_reply():
     crit = run_critic(rep, [], llm, "mock-cheap")
     assert crit.verdict == "pass"
     assert len(llm.calls) == 2
+
+
+def test_writer_falls_back_on_llm_error_with_claims_intact():
+    from deepbrief.llm import LLMError
+    from deepbrief.schemas import Claim, Source
+
+    findings = [
+        Findings(
+            sub_question_id="SQ1",
+            claims=[Claim(text="LDAC hits 990 kbps", source_id="S1", supporting_quote="990 kbps")],
+            sources=[Source(id="S1", url="http://x.com/1", title="t")],
+        )
+    ]
+    llm = MockProvider(script=[LLMError("Rate limited", status=429)])
+    rep = run_writer(findings, llm, "mock-agent")
+    assert "without LLM" in rep.title
+    assert "LDAC hits 990 kbps [S1]" in rep.sections[0].body
+    assert rep.citations == ["S1"]
+
+
+def test_critic_falls_back_to_pass_on_llm_error():
+    from deepbrief.llm import LLMError
+
+    rep = Report(title="T", summary="S", sections=[], citations=[])
+    llm = MockProvider(script=[LLMError("boom", status=500)])
+    crit = run_critic(rep, [], llm, "mock-cheap")
+    assert crit.verdict == "pass" and crit.issues == []

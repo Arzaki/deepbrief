@@ -49,8 +49,12 @@ def compute_backoff(attempt: int, base: float = 1.0, cap: float = 30.0, retry_af
     return wait
 
 
-def with_retries(fn, max_retries: int = 4, base: float = 1.0):
-    """Call fn(); retry on LLMError with status 429 or >=500."""
+def with_retries(fn, max_retries: int = 4, base: float = 1.0, on_retry=None):
+    """Call fn(); retry on LLMError with status 429 or >=500.
+
+    on_retry(exc, wait_s, attempt) fires before each sleep so callers can log
+    otherwise-invisible backoff stalls (observed 2026-10-01: ~200s silent gaps).
+    """
     last: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
@@ -63,12 +67,18 @@ def with_retries(fn, max_retries: int = 4, base: float = 1.0):
                 retryable = e.retryable
             if not retryable or attempt == max_retries:
                 raise
-            time.sleep(compute_backoff(attempt, base=base, retry_after=e.retry_after))
+            wait = compute_backoff(attempt, base=base, retry_after=e.retry_after)
+            if on_retry is not None:
+                on_retry(e, wait, attempt)
+            time.sleep(wait)
         except (TimeoutError, ConnectionError) as e:  # transient transport errors
             last = e
             if attempt == max_retries:
                 raise LLMError(str(e)) from e
-            time.sleep(compute_backoff(attempt, base=base))
+            wait = compute_backoff(attempt, base=base)
+            if on_retry is not None:
+                on_retry(e, wait, attempt)
+            time.sleep(wait)
     raise LLMError(str(last) if last else "retry loop exhausted")
 
 
@@ -82,6 +92,7 @@ class BaseProvider:
         temperature: float = 0.0,
         seed: int | None = None,
         max_tokens: int = 1000,
+        on_retry=None,
     ) -> LLMResponse:
         raise NotImplementedError
 
@@ -95,7 +106,7 @@ class OpenAICompatibleProvider(BaseProvider):
         self.name = name
         self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
 
-    def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=1000) -> LLMResponse:
+    def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=1000, on_retry=None) -> LLMResponse:
         from openai import APIStatusError, APITimeoutError, RateLimitError
 
         def _call() -> LLMResponse:
@@ -128,7 +139,7 @@ class OpenAICompatibleProvider(BaseProvider):
                 latency_s=time.time() - t0,
             )
 
-        return with_retries(_call)
+        return with_retries(_call, on_retry=on_retry)
 
 
 def _parse_retry_after(response: Any) -> float | None:
@@ -154,10 +165,16 @@ class MockProvider(BaseProvider):
         self.calls: list[dict] = []
         self._lock = threading.Lock()
 
-    def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=1000) -> LLMResponse:
+    def complete(self, messages, model, temperature=0.0, seed=None, max_tokens=1000, on_retry=None) -> LLMResponse:
         with self._lock:
             self.calls.append({"messages": messages, "model": model})
-            text = self.script.pop(0) if self.script else _mock_default_reply(messages)
+            item = self.script.pop(0) if self.script else None
+            if item is None:
+                text = _mock_default_reply(messages)
+            elif isinstance(item, BaseException):
+                raise item  # scripted failure for resilience tests
+            else:
+                text = item
         return LLMResponse(text=text, model=model, input_tokens=10, output_tokens=10, latency_s=0.001)
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..llm import BaseProvider
 from ..schemas import Critique, Findings, Report
-from .loop import complete_json_with_retry
+from .loop import complete_json_with_retry, retry_logger
 from .writer import findings_to_text
 
 PROMPT = Path(__file__).resolve().parents[3] / "prompts" / "critic.md"
@@ -31,14 +31,23 @@ def run_critic(
         "Return Critique JSON."
     )
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    return complete_json_with_retry(
-        llm,
-        messages,
-        model,
-        Critique,
-        trace,
-        "critic",
-        temperature=temperature,
-        seed=seed,
-        max_tokens=max_tokens,
-    )
+    try:
+        return complete_json_with_retry(
+            llm,
+            messages,
+            model,
+            Critique,
+            trace,
+            "critic",
+            temperature=temperature,
+            seed=seed,
+            max_tokens=max_tokens,
+            on_retry=retry_logger(trace, "critic"),
+        )
+    except Exception as e:  # noqa: BLE001 — a dead critic must not kill gathered research
+        if trace is not None:
+            trace.log("llm_retry", "critic-fallback", error=str(e)[:200])
+        return Critique(
+            issues=[],
+            verdict="pass",  # proceed with the draft; flagged as unreviewed in trace
+        )

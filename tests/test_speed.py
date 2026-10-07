@@ -100,6 +100,31 @@ def test_baseline_quick_caps_tool_iters():
     assert out["tool_calls"] == 4
 
 
+def test_pipeline_quota_storm_returns_partial_not_crash():
+    """Total LLM outage mid-run: researchers/writer/critic all fail, yet the run
+    returns a labeled fallback report instead of raising (the 2026-10-01 429 night)."""
+    from deepbrief.llm import LLMError
+
+    boom = LLMError("Rate limited", status=429)
+    llm = MockProvider(script=[PLAN, boom, boom, boom, boom, boom])
+    out = run_pipeline(
+        "q?",
+        llm,
+        "mock-agent",
+        "mock-cheap",
+        budgets=Budgets(max_tool_calls=50),
+        cache=_cache(),
+        max_workers=1,
+        use_critic=True,
+        search_fn=lambda q: [],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "x"},
+    )
+    assert "without LLM" in out["report"].title
+    assert "LLMError" in out["abort_reason"]
+    assert out["revision_rounds"] == 0
+    assert out["findings"] == []
+
+
 def test_pipeline_researcher_timeout_continues_partial():
     """A hung researcher is abandoned after researcher_timeout_s; others still report."""
     import time as _time

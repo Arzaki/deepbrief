@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ..llm import BaseProvider
 from ..schemas import Findings, Report, ReportHead, ReportSection
-from .loop import complete_json_with_retry
+from .loop import complete_json_with_retry, retry_logger
 
 PROMPT = Path(__file__).resolve().parents[3] / "prompts" / "writer.md"
 
@@ -68,6 +68,7 @@ def run_head(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": head_user}],
         pydantic_model=ReportHead,
         agent_name="writer-head",
+        on_retry=retry_logger(trace, "writer-head"),
         **_common(llm, model, trace, temperature, seed, max_tokens),
     )
 
@@ -103,6 +104,7 @@ def run_sections(
             messages=[{"role": "system", "content": system}, {"role": "user", "content": sec_user}],
             pydantic_model=ReportSection,
             agent_name="writer-section",
+            on_retry=retry_logger(trace, "writer-section"),
             **common,
         )
 
@@ -112,7 +114,34 @@ def run_sections(
         return list(pool.map(_section, groups))
 
 
-def run_writer(
+def _fallback_report(findings: list[Findings], note: str) -> Report:
+    """Deterministic no-LLM report: list every verified claim under its section.
+
+    Used when the writer's own LLM calls fail (quota/network). Cites only
+    researcher-supplied claims, so faithfulness holds by construction.
+    """
+    sections = []
+    for f in findings:
+        if not f.claims:
+            continue
+        body = "\n".join(f"- {c.text} [{c.source_id}]" for c in f.claims)
+        sections.append(ReportSection(heading=f"Findings {f.sub_question_id}", body=body))
+    if not sections:
+        body = "No verified claims were supplied by the researchers."
+        if note:
+            body += f" Writer unavailable: {note}"
+        sections = [ReportSection(heading="No verified findings", body=body)]
+    citations = sorted({c.source_id for f in findings for c in f.claims})
+    return Report(
+        title="Research findings (assembled without LLM writer)",
+        summary=f"{sum(len(f.claims) for f in findings)} verified claims across "
+        f"{len(sections)} sections. {note}".strip(),
+        sections=sections,
+        citations=citations,
+    )
+
+
+def _run_writer_llm(
     findings: list[Findings],
     llm: BaseProvider,
     model: str,
@@ -145,6 +174,7 @@ def run_writer(
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
             pydantic_model=Report,
             agent_name="writer",
+            on_retry=retry_logger(trace, "writer"),
             **common,
         )
     head = run_head(findings, feedback=feedback, **common)
@@ -152,3 +182,40 @@ def run_writer(
     sections = run_sections(groups, feedback=feedback, max_workers=max_workers, **common)
     citations = sorted({c.source_id for f in findings for c in f.claims} | {s.id for f in findings for s in f.sources})
     return Report(title=head.title, summary=head.summary, sections=sections, citations=citations)
+
+
+def run_writer(
+    findings: list[Findings],
+    llm: BaseProvider,
+    model: str,
+    trace=None,
+    temperature: float = 0.0,
+    seed: int | None = None,
+    max_tokens: int = 1000,
+    feedback: str = "",
+    max_workers: int = 3,
+) -> Report:
+    """Public entry: LLM report, or a deterministic cited fallback if the LLM is down.
+
+    The fallback keeps quota/network outages from killing runs that already did
+    the expensive research (observed 2026-10-01: 429-storm after 14 claims gathered).
+    """
+    from ..llm import LLMError
+
+    try:
+        return _run_writer_llm(
+            findings,
+            llm,
+            model,
+            trace=trace,
+            temperature=temperature,
+            seed=seed,
+            max_tokens=max_tokens,
+            feedback=feedback,
+            max_workers=max_workers,
+        )
+    except (LLMError, RuntimeError) as e:
+        note = f"LLM writer unavailable ({type(e).__name__}); assembled deterministically."
+        if trace is not None:
+            trace.log("llm_retry", "writer-fallback", error=str(e)[:200])
+        return _fallback_report(findings, note)

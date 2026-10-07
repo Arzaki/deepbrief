@@ -115,6 +115,41 @@ def test_mock_provider():
     assert "pass" in r.text
 
 
+def test_mock_provider_scripted_exception():
+    from deepbrief.llm import LLMError
+
+    m = MockProvider(script=[LLMError("Rate limited", status=429)])
+    with pytest.raises(LLMError):
+        m.complete([{"role": "user", "content": "hi"}], "mock-agent")
+
+
+def test_with_retries_fires_on_retry_hook():
+    seen = []
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise LLMError("rate limited", status=429)
+        return "ok"
+
+    out = with_retries(fn, max_retries=4, base=0.001, on_retry=lambda e, w, a: seen.append((e.status, a)))
+    assert out == "ok" and seen == [(429, 0), (429, 1)]
+
+
+def test_retry_logger_writes_trace_event_without_totals(tmp_path):
+    from deepbrief.agents.loop import retry_logger
+
+    t = RunTrace(str(tmp_path), "v1", {})
+    hook = retry_logger(t, "researcher")
+    assert hook is not None
+    hook(LLMError("slow", status=429), 12.5, 2)
+    assert t.totals["llm_calls"] == 0  # retries are events, not billable calls
+    kinds = [e["kind"] for e in t.events]
+    assert kinds == ["llm_retry"]
+    assert retry_logger(None, "x") is None
+
+
 def test_budgets_thread_safe():
     from concurrent.futures import ThreadPoolExecutor
 

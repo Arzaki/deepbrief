@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from ..llm import BaseProvider
 from ..schemas import Plan
-from .loop import parse_json_strict
+from .loop import parse_json_strict, retry_logger
 
 PROMPT = Path(__file__).resolve().parents[3] / "prompts" / "planner.md"
 
@@ -43,7 +43,14 @@ def run_planner(
                     "content": f"Previous output failed validation: {last_err}. Return ONLY valid JSON.",
                 }
             ]
-        resp = llm.complete(messages, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
+        resp = llm.complete(
+            messages,
+            model,
+            temperature=temperature,
+            seed=seed,
+            max_tokens=max_tokens,
+            on_retry=retry_logger(trace, "planner"),
+        )
         if trace:
             trace.log_llm("planner", model, resp.input_tokens, resp.output_tokens, resp.latency_s)
         try:
