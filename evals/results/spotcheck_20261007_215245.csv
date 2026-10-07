@@ -1,0 +1,37 @@
+id,config,depth,report_excerpt
+q03,baseline,standard,"# Mock offline report
+
+Offline mock run with no live retrieval; content is placeholder.
+
+## Overview
+
+No verified claims in offline mode.
+
+## Sources"
+q03,baseline,quick,"# Mock offline report
+
+Offline mock run with no live retrieval; content is placeholder.
+
+## Overview
+
+No verified claims in offline mode.
+
+## Sources"
+q03,multi-critic,standard,"# Mock offline report
+
+Offline mock run with no live retrieval; content is placeholder.
+
+## Overview
+
+No verified claims in offline mode.
+
+## Sources"
+q03,multi-critic,quick,"# Mock offline report
+
+Offline mock run with no live retrieval; content is placeholder.
+
+## Overview
+
+No verified claims in offline mode.
+
+## Sources"

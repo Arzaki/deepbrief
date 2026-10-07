@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # Per-researcher wall budget: abandon a hung researcher and continue partial
     # instead of stalling the whole run (hung tool/LLM calls escape turn counting).
     researcher_timeout_s: int = 240
+    # Public-demo guard: max runs per session id before refusal. Lower on hosted demos.
+    session_cap: int = 5
 
     max_llm_calls: int = 40
     max_tool_calls: int = 30

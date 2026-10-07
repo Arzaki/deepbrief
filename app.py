@@ -21,7 +21,7 @@ from deepbrief.tracing import RunTrace
 
 settings = Settings()
 SESSION_RUNS: dict[str, int] = {}
-SESSION_CAP = 5
+SESSION_CAP = settings.session_cap
 
 
 def linkify_citations(md: str, url_map: dict[str, str]) -> str:
@@ -42,7 +42,7 @@ def run_fn(question: str, mode: str, depth: str, session: str, progress: gr.Prog
     key = session or "default"
     SESSION_RUNS[key] = SESSION_RUNS.get(key, 0) + 1
     if SESSION_RUNS[key] > SESSION_CAP:
-        return "Session run cap reached (5). Please restart the demo.", "", ""
+        return f"Session run cap reached ({SESSION_CAP}). Please restart the demo.", "", ""
     s = Settings()
     cache = DiskCache(s.cache_db, enabled=s.cache_enabled)
     trace = RunTrace(

@@ -87,7 +87,16 @@ See [evals/FAILURES.md](evals/FAILURES.md) — filled only with failures actuall
 
 ## Deploy to Hugging Face Spaces
 
-1. Create a Space (Gradio SDK, Python 3.11).
-2. Push this repo (entrypoint `app.py`); set Secrets `GROQ_API_KEY`, optionally `TAVILY_API_KEY`, `LLM_PROVIDER=groq`.
-3. The `Dockerfile` is provided for container deploys; Spaces uses `app.py` directly.
-4. Demo guards: per-session run cap (5) + hard per-run budgets so one user cannot drain free-tier quota.
+> **Live demo:** TBD — paste the Space URL here after deploy.
+> **Repo:** TBD — paste the public GitHub URL here after push.
+
+1. Create a Space (Gradio SDK, Python 3.11, free CPU). Upload (or repo-link) `app.py`,
+   `requirements.txt`, `runtime.txt`, `src/`, `prompts/` (entrypoint `app.py`).
+2. In Space **Settings → Secrets**, set `GROQ_API_KEY` (never in code). Optional:
+   `TAVILY_API_KEY`. In **Variables**, set `LLM_PROVIDER=groq`, plus tighter public-demo
+   budgets: `MAX_LLM_CALLS=25`, `SESSION_CAP=3`, `RESEARCH_WORKERS=2`.
+3. Expect free-tier behavior: Spaces sleep when idle (30–60s cold start), and every
+   visitor run spends **your** Groq quota (~$0.02 quick, ~$0.03–0.07 standard). The
+   per-session cap + per-run budgets exist exactly so one visitor cannot drain it.
+   Watch quota for the first days; tighten further if needed.
+4. The `Dockerfile` is provided for container deploys; Gradio SDK Spaces use `app.py` directly.
