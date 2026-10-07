@@ -76,6 +76,10 @@ def run_baseline(
         resp = llm.complete(transcript, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
         if trace:
             trace.log_llm("baseline", model, resp.input_tokens, resp.output_tokens, resp.latency_s)
+            try:
+                trace.save()  # per-turn persistence: killed runs keep forensics
+            except Exception:
+                pass
         budgets.register_llm(resp.input_tokens + resp.output_tokens)
         txt = resp.text.strip()
         if txt.startswith("TOOL:"):
