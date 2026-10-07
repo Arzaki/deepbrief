@@ -84,9 +84,11 @@ def run_researcher(
 
     searches_used = 0
     seen_queries: set[str] = set()
+    saw_results = False
+    fetch_forced_once = False
 
     def _tool(name: str, arg: str) -> str:
-        nonlocal searches_used
+        nonlocal searches_used, saw_results
         if budgets:
             budgets.register_tool()
             if trace:
@@ -106,6 +108,8 @@ def run_researcher(
             seen_queries.add(q)
             searches_used += 1
             res = search_fn(arg)
+            if res:
+                saw_results = True
             lines = []
             for i, r in enumerate(res[:5], start=1):
                 lines.append(f"[{i}]: {r.get('title', '')} {r.get('url', '')} — {r.get('snippet', '')[:200]}")
@@ -207,6 +211,22 @@ def run_researcher(
             try:
                 data = parse_json_lenient(txt.replace("FINAL", "").strip())
                 data.setdefault("sub_question_id", sub_qid)
+                f = Findings.model_validate(data)
+                # No-fetch FINAL with un-fetched results on the table: send the model
+                # back once to fetch (observed 2026-10-01: searches without a single
+                # fetch → empty findings → zero-coverage report). Genuinely empty
+                # searches may still finalize empty.
+                if not sources and not f.sources and saw_results and not fetch_forced_once:
+                    fetch_forced_once = True
+                    transcript.append(
+                        {
+                            "role": "user",
+                            "content": "You have search results you never fetched. Fetch the most "
+                            "promising URL now (fetch_pages takes up to 3) — FINAL with zero "
+                            "fetched pages is not accepted on the first attempt.",
+                        }
+                    )
+                    continue
                 f = Findings.model_validate(data)
                 # attach discovered sources not already listed
                 known = {s.id for s in f.sources}

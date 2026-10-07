@@ -370,6 +370,52 @@ def test_researcher_batch_fetch_caps_at_three_urls():
     assert len(pages) == 3
 
 
+def test_researcher_empty_final_after_results_forces_one_fetch():
+    """FINAL with zero fetches while results sit unfetched: sent back once to fetch.
+    Second empty FINAL is accepted (genuinely nothing usable)."""
+    fetched = []
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(
+        script=[
+            "TOOL: web_search | vector db",
+            f"FINAL {final}",
+            "TOOL: fetch_page | http://hit.test/a",
+            f"FINAL {final}",
+        ]
+    )
+    f, pages = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: [{"title": "t", "url": "http://hit.test/a", "snippet": "s"}],
+        fetch_fn=lambda u: (fetched.append(u), {"url": u, "title": "t", "text": "x"})[1],
+    )
+    assert fetched == ["http://hit.test/a"]
+    assert sorted(pages) == ["S1"] and f.claims == []
+
+
+def test_researcher_empty_final_without_results_accepted():
+    """Searches came back empty: empty FINAL goes through with no forced fetch."""
+    calls = {"n": 0}
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+
+    def counting(q):
+        calls["n"] += 1
+        return []
+
+    llm = MockProvider(script=["TOOL: web_search | void xyz", f"FINAL {final}"])
+    f, _ = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=counting,
+        fetch_fn=lambda u: (_ for _ in ()).throw(AssertionError("must not fetch")),
+    )
+    assert calls["n"] == 1 and f.claims == []
+
+
 def test_researcher_saves_trace_each_turn(tmp_path):
     """Kill-visibility: the trace file must exist mid-run, not only at the end."""
     from deepbrief.tracing import RunTrace

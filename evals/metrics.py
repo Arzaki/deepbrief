@@ -10,8 +10,17 @@ def coverage_score(judgments) -> float:
 
 
 def entailment_scores(judgments) -> dict:
+    # Always return the full key set: the eval CSV writer takes fieldnames from the
+    # first row, and a missing key on any later row crashes the whole run
+    # (observed 2026-10-01: empty judgments on row 1, keys present on row 2).
     if not judgments:
-        return {"citation_accuracy": 0.0, "faithfulness": 0.0}
+        return {
+            "citation_accuracy": 0.0,
+            "faithfulness": 0.0,
+            "supported": 0,
+            "partial": 0,
+            "unsupported": 0,
+        }
     sup = sum(1 for j in judgments if j.verdict == "supported")
     part = sum(1 for j in judgments if j.verdict == "partially")
     n = len(judgments)

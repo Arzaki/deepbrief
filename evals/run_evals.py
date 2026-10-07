@@ -28,8 +28,7 @@ from evals.judges import judge_coverage, judge_entailment  # noqa: E402
 from evals.metrics import coverage_score, entailment_scores  # noqa: E402
 
 
-def load_questions(path: Path, limit: int | None = None, offline: bool = False,
-                   ids: set[str] | None = None):
+def load_questions(path: Path, limit: int | None = None, offline: bool = False, ids: set[str] | None = None):
     qs = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     if ids:
         qs = [q for q in qs if q["id"] in ids]
@@ -205,7 +204,9 @@ def main():
     judge = make_judge_provider(settings) if not args.offline else MockProvider()
     judge_model = settings.resolved_judge_model() if not args.offline else "mock"
     questions = load_questions(
-        Path(args.questions), args.limit, args.offline,
+        Path(args.questions),
+        args.limit,
+        args.offline,
         {i.strip() for i in args.ids.split(",")} if args.ids else None,
     )
     depths = [d.strip() for d in args.depths.split(",") if d.strip()]
