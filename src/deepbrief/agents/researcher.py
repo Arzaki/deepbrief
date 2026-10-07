@@ -12,7 +12,7 @@ from ..security import strip_injection_attempts, wrap_untrusted
 from ..tools.calculator import calculator
 from ..tools.fetch import fetch_page
 from ..tools.web_search import web_search
-from .loop import parse_json_lenient, retry_logger
+from .loop import parse_json_lenient, retry_logger, trim_transcript
 
 PROMPT = Path(__file__).resolve().parents[3] / "prompts" / "researcher.md"
 
@@ -171,6 +171,7 @@ def run_researcher(
             break
         if turn == max_iters - 1:
             transcript.append({"role": "user", "content": FINAL_TURN_DIRECTIVE})
+        transcript = trim_transcript(transcript)
         resp = llm.complete(
             transcript,
             model,

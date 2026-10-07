@@ -370,6 +370,40 @@ def test_researcher_batch_fetch_caps_at_three_urls():
     assert len(pages) == 3
 
 
+def test_trim_transcript_bounds_size_keeping_edges():
+    from deepbrief.agents.loop import trim_transcript
+
+    msgs = [{"role": "system", "content": "SYS"}, {"role": "user", "content": "Q"}]
+    for i in range(10):
+        msgs.append({"role": "assistant", "content": f"toolcall {i}"})
+        msgs.append({"role": "user", "content": "X" * 3000})
+    out = trim_transcript(msgs)
+    assert out[0]["content"] == "SYS" and out[1]["content"] == "Q"
+    assert out[-1]["content"] == "X" * 3000  # newest retained
+    assert sum(len(m["content"]) for m in out) <= 12000
+    # small transcripts pass through untouched and in order
+    tiny = [{"role": "a", "content": "1"}, {"role": "b", "content": "2"}]
+    assert trim_transcript(tiny) == tiny
+
+
+def test_baseline_long_fetch_loop_stays_bounded():
+    """10 turns of 4KB fetches must not grow the request without bound (413 fix)."""
+    rep = json.dumps({"title": "T", "summary": "S", "sections": [], "citations": []})
+    script = [f"TOOL: fetch_page | http://x.com/p{i}" for i in range(8)] + [f"FINAL {rep}"]
+    llm = MockProvider(script=script)
+    out = run_baseline(
+        "q?",
+        llm,
+        "mock-agent",
+        budgets=Budgets(max_llm_calls=30, max_tool_calls=30),
+        search_fn=lambda q: [],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "Z" * 4000},
+    )
+    assert out["report"].title == "T"
+    biggest = max(sum(len(str(m.get("content", ""))) for m in c["messages"]) for c in llm.calls)
+    assert biggest <= 13500
+
+
 def test_researcher_empty_final_after_results_forces_one_fetch():
     """FINAL with zero fetches while results sit unfetched: sent back once to fetch.
     Second empty FINAL is accepted (genuinely nothing usable)."""

@@ -35,6 +35,27 @@ def parse_json_lenient(text: str) -> dict:
         return json.loads(raw, strict=False)
 
 
+def trim_transcript(transcript: list[dict], keep_tail: int = 6, max_chars: int = 12000) -> list[dict]:
+    """Bound request size for long tool loops.
+
+    Always keeps the system prompt + original question, then the newest tail;
+    drops oldest middle exchanges first. Prevents 413 request-too-large deaths
+    (observed 2026-10-01: baseline accumulating 4KB fetches died at 444s with 413)
+    and keeps late calls fast (smaller inputs queue cheaper too). FINAL payloads
+    are self-contained, so dropping middle tool output is safe.
+    """
+    if len(transcript) <= 2 + keep_tail:
+        head, tail = transcript[:2], transcript[2:]
+    else:
+        head, tail = transcript[:2], transcript[-keep_tail:]
+    total = sum(len(str(m.get("content", ""))) for m in head + tail)
+    tail = list(tail)
+    while total > max_chars and len(tail) > 2:
+        dropped = tail.pop(0)
+        total -= len(str(dropped.get("content", "")))
+    return head + tail
+
+
 def retry_logger(trace, agent_name: str):
     """Build an on_retry callback logging otherwise-invisible backoff stalls."""
     if trace is None:

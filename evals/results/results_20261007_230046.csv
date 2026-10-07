@@ -1,0 +1,2 @@
+id,config,depth,error,coverage,citation_accuracy,faithfulness,supported,partial,unsupported,latency_s,tokens,cost_usd,llm_calls,tool_calls,trace
+q14,multi-critic,quick,,1.0,1.0,1.0,16,0,0,191.17,24505,0.032551,19,11,traces\run_5f01dc19713a.json

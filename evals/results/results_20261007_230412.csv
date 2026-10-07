@@ -1,0 +1,2 @@
+id,config,depth,error,coverage,citation_accuracy,faithfulness,supported,partial,unsupported,latency_s,tokens,cost_usd,llm_calls,tool_calls,trace
+q02,baseline,standard,"LLMError: Error code: 413 - {'error': {'message': 'Request too large for model `qwen/qwen3.8-27b` in organization `org_01hxw8jhsjeenvphrk37jttzzc` service tier `on_demand` on input tokens per minute (ITPM): Limit 7000, Requested 7698, please reduce your message size and try again. Need more tokens? ",0.0,0.0,0.0,0,0,0,0.0,0,0.0,0,0,

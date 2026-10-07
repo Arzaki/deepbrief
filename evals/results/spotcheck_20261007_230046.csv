@@ -1,0 +1,4 @@
+id,config,depth,report_excerpt
+q14,multi-critic,quick,"# TCP vs UDP: Reliability, Speed, and Application Suitability
+
+TCP is a connection-oriented protocol that ensures reliable, ordered data delivery through a three-way handshake, acknowledgements, and retransmission mechanisms [S1][S2]. In contrast, UDP is a connectionless protocol that prioritizes speed and low latency by sending data immediately without setup or delivery guarantees [S1][S2]. TCP manages flow and congestion control and uses a variable header, while UDP lacks these features and us"

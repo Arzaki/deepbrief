@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from .agents.loop import parse_json_strict
+from .agents.loop import parse_json_strict, trim_transcript
 from .budgets import Budgets
 from .llm import BaseProvider
 from .schemas import Report
@@ -72,6 +72,7 @@ def run_baseline(
         if reason:
             abort_reason = reason
             break
+        transcript = trim_transcript(transcript)
         resp = llm.complete(transcript, model, temperature=temperature, seed=seed, max_tokens=max_tokens)
         if trace:
             trace.log_llm("baseline", model, resp.input_tokens, resp.output_tokens, resp.latency_s)
