@@ -81,6 +81,7 @@ def _run(args, s, llm, budgets, cache, trace):
             max_tokens=s.llm_max_tokens,
             depth=args.depth,
             max_workers=s.research_workers,
+            researcher_timeout_s=s.researcher_timeout_s,
             verbose=True,
         )
     return out

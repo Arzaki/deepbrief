@@ -370,6 +370,28 @@ def test_researcher_batch_fetch_caps_at_three_urls():
     assert len(pages) == 3
 
 
+def test_researcher_saves_trace_each_turn(tmp_path):
+    """Kill-visibility: the trace file must exist mid-run, not only at the end."""
+    from deepbrief.tracing import RunTrace
+
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(script=["TOOL: fetch_page | http://x.com/a", f"FINAL {final}"])
+    trace = RunTrace(str(tmp_path), "v1", {})
+    run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        trace=trace,
+        search_fn=lambda q: [],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "x"},
+    )
+    files = list(tmp_path.glob("run_*.json"))
+    assert len(files) == 1
+    data = json.loads(files[0].read_text())
+    assert sum(1 for e in data["events"] if e["kind"] == "llm") == 2
+
+
 def test_shared_sid_minter_unique_across_researchers():
     """Without a shared namespace every researcher mints its own S1 (observed live:
     three different pages all cited as [S1]). With mint_sid, ids stay globally unique."""

@@ -85,6 +85,7 @@ def run_fn(question: str, mode: str, depth: str, session: str, progress: gr.Prog
                 max_tokens=s.llm_max_tokens,
                 depth=depth,
                 max_workers=s.research_workers,
+                researcher_timeout_s=s.researcher_timeout_s,
             )
             url_map = {src.id: src.url for f in out.get("findings", []) for src in f.sources}
             progress(0.9, desc="Writing + critiquing...")

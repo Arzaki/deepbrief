@@ -65,6 +65,16 @@ def run_researcher(
     page_texts: dict[str, str] = {}
     _local_sid = 0
 
+    def _save_trace() -> None:
+        # Persist every turn: a killed run still leaves the exact hanging call
+        # visible (last logged event with no successor). Cheap, never fatal.
+        saver = getattr(trace, "save", None)
+        if callable(saver):
+            try:
+                saver()
+            except Exception:
+                pass
+
     def _mint() -> str:
         nonlocal _local_sid
         if mint_sid is not None:
@@ -169,6 +179,7 @@ def run_researcher(
             )
         if budgets:
             budgets.register_llm(resp.input_tokens + resp.output_tokens)
+        _save_trace()
         txt = resp.text.strip()
         if txt.startswith("TOOL:"):
             try:

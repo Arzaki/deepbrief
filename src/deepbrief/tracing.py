@@ -65,13 +65,16 @@ class RunTrace:
 
     def save(self) -> Path:
         self.trace_dir.mkdir(parents=True, exist_ok=True)
+        with self._lock:  # snapshot under lock: events mutate from worker threads
+            events = list(self.events)
+            totals = dict(self.totals)
         payload = {
             "run_id": self.run_id,
             "prompt_version": self.prompt_version,
             "config": self.config_snapshot,
-            "totals": self.totals,
+            "totals": totals,
             "wall_s": round(time.time() - self.started, 3),
-            "events": self.events,
+            "events": events,
         }
         path = self.trace_dir / f"run_{self.run_id}.json"
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

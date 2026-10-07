@@ -6,15 +6,87 @@ import itertools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 
 from .agents.critic import run_critic
 from .agents.planner import run_planner
 from .agents.researcher import run_researcher
-from .agents.writer import run_writer
+from .agents.writer import run_sections, run_writer
 from .baseline import report_to_markdown
 from .budgets import Budgets
 from .llm import BaseProvider
+from .schemas import Report
 from .verify import verify_findings
+
+
+def _section_index_for_issue(target: str | None, sections) -> int | None:
+    """Map a critic issue onto a section index via its heading; None if unmappable."""
+    t = (target or "").strip().lower()
+    if not t:
+        return None
+    for i, s in enumerate(sections):
+        h = (s.heading or "").strip().lower()
+        if h and (h in t or t in h):
+            return i
+    return None
+
+
+def _revise_report(
+    report: Report,
+    findings,
+    critique,
+    llm,
+    model,
+    trace=None,
+    temperature: float = 0.0,
+    seed: int | None = None,
+    max_tokens: int = 1000,
+    max_workers: int = 3,
+) -> Report:
+    """Regenerate only the critic-flagged sections; full rewrite if issues don't map."""
+    groups = [f for f in findings if f.claims]
+    per_group: dict[str, str] = {}
+    idxs: list[int] = []
+    mappable = critique is not None and bool(critique.issues) and len(report.sections) == len(groups)
+    if mappable:
+        for issue in critique.issues:
+            j = _section_index_for_issue(issue.target, report.sections)
+            if j is None:  # an issue we can't place: don't silently drop it
+                mappable = False
+                break
+            if j not in idxs:
+                idxs.append(j)
+            key = groups[j].sub_question_id
+            per_group[key] = per_group.get(key, "") + f"- [{issue.type}] {issue.detail}\n"
+    if not mappable or not idxs:
+        feedback = "\n".join(f"- [{i.type}] {i.detail}" for i in critique.issues) if critique else ""
+        return run_writer(
+            findings,
+            llm,
+            model,
+            trace=trace,
+            temperature=temperature,
+            seed=seed,
+            max_tokens=max_tokens,
+            feedback=feedback,
+            max_workers=max_workers,
+        )
+    subset = [groups[j] for j in idxs]
+    fresh = run_sections(
+        subset,
+        llm,
+        model,
+        trace=trace,
+        temperature=temperature,
+        seed=seed,
+        max_tokens=max_tokens,
+        max_workers=max_workers,
+        per_group_feedback=per_group,
+    )
+    sections = list(report.sections)
+    for j, sec in zip(idxs, fresh, strict=True):
+        sections[j] = sec
+    return Report(title=report.title, summary=report.summary, sections=sections, citations=report.citations)
 
 
 def _checkpoint(trace, stage: str) -> None:
@@ -49,6 +121,7 @@ def run_pipeline(
     fetch_fn=None,
     depth: str = "standard",
     max_workers: int = 3,
+    researcher_timeout_s: int = 240,
     verbose: bool = False,
 ) -> dict:
     budgets = budgets or Budgets()
@@ -103,15 +176,36 @@ def run_pipeline(
         results = [_research(sq) for sq in plan.sub_questions]
     else:
         # Sub-questions are independent; budgets/cache/trace/LLM client are all thread-safe.
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            results = list(pool.map(_research, plan.sub_questions))
+        # Each future is bounded: a hung researcher is abandoned (partial) instead of
+        # stalling the run past every other timeout (observed 2026-10-01: 600s, zero findings).
+        # NOTE: explicit shutdown(wait=False) — a `with` block would join hung workers and
+        # defeat the timeouts. A truly hung native call may leak its worker thread.
+        pool = ThreadPoolExecutor(max_workers=max_workers)
+        try:
+            futs = [pool.submit(_research, sq) for sq in plan.sub_questions]
+            results = []
+            for sq, fut in zip(plan.sub_questions, futs, strict=True):
+                try:
+                    results.append(fut.result(timeout=researcher_timeout_s))
+                except FuturesTimeout:
+                    results.append(None)
+                    note = f"researcher_timeout({sq.id}>{researcher_timeout_s}s)"
+                    ab = f"{abort_reason}; " if abort_reason else ""
+                    abort_reason = ab + note
+                    if verbose:
+                        print(f"[research timeout] {note}; continuing partial", flush=True)
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+    partial = False
     for res in results:
         if res is None:
-            abort_reason = budgets.check() or ""
-            break
+            partial = True
+            continue
         f, pages = res
         all_findings.append(f)
         page_texts.update(pages)
+    if partial and not abort_reason:
+        abort_reason = budgets.check() or "partial_researcher_results"
     if verbose:
         n_claims = sum(len(f.claims) for f in all_findings)
         print(
@@ -119,7 +213,6 @@ def run_pipeline(
             flush=True,
         )
     _checkpoint(trace, "research done")
-    feedback = ""
     report = None
     critique = None
     rounds = 0
@@ -127,17 +220,35 @@ def run_pipeline(
         if budgets.check():
             abort_reason = budgets.check() or ""
             break
-        report = run_writer(
-            all_findings,
-            llm,
-            model,
-            trace=trace,
-            temperature=temperature,
-            seed=seed,
-            max_tokens=max_tokens,
-            feedback=feedback,
-            max_workers=max_workers,
-        )
+        if report is None:
+            report = run_writer(
+                all_findings,
+                llm,
+                model,
+                trace=trace,
+                temperature=temperature,
+                seed=seed,
+                max_tokens=max_tokens,
+                feedback="",
+                max_workers=max_workers,
+            )
+        else:
+            # Targeted revision: regenerate ONLY the sections the critic flagged
+            # (a full rewrite costs head + every section; measured 2026-10-01 a
+            # revision round at ~130s of queued calls). Falls back to a full
+            # rewrite when issues don't map cleanly onto sections.
+            report = _revise_report(
+                report,
+                all_findings,
+                critique,
+                llm,
+                model,
+                trace=trace,
+                temperature=temperature,
+                seed=seed,
+                max_tokens=max_tokens,
+                max_workers=max_workers,
+            )
         budgets.register_llm(100)
         if verbose:
             print(f"[writer] round {rounds}: {len(report.sections)} sections", flush=True)
@@ -162,7 +273,6 @@ def run_pipeline(
                 abort_reason = "revision_cap_reached(2)"
             break
         rounds += 1
-        feedback = "\n".join(f"- [{i.type}] {i.detail}" for i in critique.issues)
     if report is None:
         from .schemas import Report as R
 

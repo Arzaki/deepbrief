@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     llm_timeout_s: int = 30
     # Researcher threads for the multi-agent pipeline (sub-questions are independent).
     research_workers: int = 3
+    # Per-researcher wall budget: abandon a hung researcher and continue partial
+    # instead of stalling the whole run (hung tool/LLM calls escape turn counting).
+    researcher_timeout_s: int = 240
 
     max_llm_calls: int = 40
     max_tool_calls: int = 30
