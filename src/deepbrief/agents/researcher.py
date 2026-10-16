@@ -86,6 +86,55 @@ def run_researcher(
     seen_queries: set[str] = set()
     saw_results = False
     fetch_forced_once = False
+    turns_used = 0
+    bonus_used = False
+
+    KNOWN_TOOLS = ("web_search", "fetch_page", "fetch_pages", "calculator")
+
+    def _parse_tools(txt: str) -> list[tuple[str, str]]:
+        """All TOOL directives in a response, in order (max 3). Leading chatter is
+        ignored; unknown tool names are skipped. Previously only a leading single
+        TOOL was honored: chattered tools never ran, and a second TOOL line was
+        glued into the first query (observed 2026-10-0x traces)."""
+        found = []
+        for seg in txt.split("TOOL:"):
+            seg = seg.strip()
+            if "|" not in seg:
+                continue
+            name, arg = [p.strip() for p in seg.split("|", 1)]
+            if name in KNOWN_TOOLS:
+                found.append((name, arg))
+            if len(found) >= 3:
+                break
+        return found
+
+    def _fetch_urls(urls: list[str]) -> str:
+        """Fetch + mint SIDs + attach sources. Shared by explicit and auto-fetch."""
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            fetched = list(pool.map(fetch_fn, urls))
+        blocks = []
+        for url, pg in zip(urls, fetched, strict=True):
+            pg = pg or {}
+            err = pg.get("error", "")
+            text = strip_injection_attempts((pg.get("text", "") or "")[:4000])
+            sid = _mint()
+            sources.append(
+                Source(
+                    id=sid,
+                    url=url,
+                    title=pg.get("title", ""),
+                    fetched_at=datetime.now(UTC).isoformat(),
+                )
+            )
+            page_texts[sid] = text
+            if text:
+                blocks.append(
+                    f"Fetched [{sid}] {url} — cite this as [{sid}] with a verbatim quote:\n"
+                    + wrap_untrusted(text[:4000])
+                )
+            else:
+                blocks.append(f"Fetched [{sid}] {url} — EMPTY or failed ({err[:150]}). Try another URL.")
+        return "\n\n".join(blocks)
 
     def _tool(name: str, arg: str) -> str:
         nonlocal searches_used, saw_results
@@ -115,7 +164,22 @@ def run_researcher(
                 lines.append(f"[{i}]: {r.get('title', '')} {r.get('url', '')} — {r.get('snippet', '')[:200]}")
             if not lines:
                 return "0 results. Reformulate ONCE (check for typos/alternate terms), or fetch a known URL, or FINAL."
-            return "Search results (fetch by URL to get a citable S-id):\n" + "\n".join(lines)
+            reply = "Search results:\n" + "\n".join(lines)
+            # Eager auto-fetch: the top result is fetched in the SAME turn (fetches cost
+            # zero quota, only seconds), so researchers always hold citable evidence.
+            # Observed 2026-10-16: four researchers searched, none ever fetched, all
+            # surrendered with empty FINALs inside 3 quick-mode turns.
+            top = next(
+                (str(r.get("url", "")).strip() for r in res if str(r.get("url", "")).strip().startswith("http")), ""
+            )
+            if top and len(sources) < 3:
+                if budgets:
+                    budgets.register_tool()  # the auto-fetch is real tool work: count it
+                auto = _fetch_urls([top])
+                reply += f"\n\nTop result auto-fetched (cost no turn — cite [{sources[-1].id}]):\n{auto}"
+            else:
+                reply += "\n(fetch others by URL with fetch_page / fetch_pages to get citable S-ids)"
+            return reply
         if name in ("fetch_page", "fetch_pages"):
             # Batch form fetches up to 3 URLs concurrently in ONE turn, so depth
             # doesn't cost extra researcher turns (fetches are free, only time).
@@ -126,31 +190,7 @@ def run_researcher(
             urls = urls[:1] if name == "fetch_page" else urls[:3]
             if not urls:
                 return "ERROR: no valid http(s) URL found. Provide full URLs to fetch."
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                fetched = list(pool.map(fetch_fn, urls))
-            blocks = []
-            for url, pg in zip(urls, fetched, strict=True):
-                pg = pg or {}
-                err = pg.get("error", "")
-                text = strip_injection_attempts((pg.get("text", "") or "")[:4000])
-                sid = _mint()
-                sources.append(
-                    Source(
-                        id=sid,
-                        url=url,
-                        title=pg.get("title", ""),
-                        fetched_at=datetime.now(UTC).isoformat(),
-                    )
-                )
-                page_texts[sid] = text
-                if text:
-                    blocks.append(
-                        f"Fetched [{sid}] {url} — cite this as [{sid}] with a verbatim quote:\n"
-                        + wrap_untrusted(text[:4000])
-                    )
-                else:
-                    blocks.append(f"Fetched [{sid}] {url} — EMPTY or failed ({err[:150]}). Try another URL.")
-            return "\n\n".join(blocks)
+            return _fetch_urls(urls) or "No pages fetched."
         if name == "calculator":
             return calculator(arg)
         return "ERROR: unknown tool"
@@ -161,15 +201,17 @@ def run_researcher(
             "role": "user",
             "content": (
                 f"Sub-question [{sub_qid}]: {sub_qtext}\n"
-                "Use tools by replying with TOOL: name | arg. "
+                "Use tools by replying with TOOL: name | arg lines (up to 3 per reply; "
+                "leading explanation text is fine). "
                 "When done, reply with FINAL JSON Findings."
             ),
         },
     ]
-    for turn in range(max_iters):
+    turns_used = 0
+    while turns_used < max_iters:
         if budgets and budgets.check():
             break
-        if turn == max_iters - 1:
+        if turns_used == max_iters - 1:
             transcript.append({"role": "user", "content": FINAL_TURN_DIRECTIVE})
         transcript = trim_transcript(transcript)
         resp = llm.complete(
@@ -180,6 +222,7 @@ def run_researcher(
             max_tokens=max_tokens,
             on_retry=retry_logger(trace, "researcher"),
         )
+        turns_used += 1
         if trace:
             trace.log_llm(
                 "researcher",
@@ -194,20 +237,35 @@ def run_researcher(
             budgets.register_llm(resp.input_tokens + resp.output_tokens)
         _save_trace()
         txt = resp.text.strip()
-        if txt.startswith("TOOL:"):
-            try:
-                _, rest = txt.split("TOOL:", 1)
-                name, arg = [p.strip() for p in rest.split("|", 1)]
-            except ValueError:
-                transcript.append({"role": "user", "content": "Bad TOOL format. Use TOOL: name | arg"})
-                continue
-            out = _tool(name, arg)
+        calls = _parse_tools(txt)
+        if calls:
+            if budgets and budgets.check():
+                transcript.append({"role": "user", "content": f"Stopped: {budgets.check()}"})
+                break
+            sources_before = len(sources)
+            outs = []
+            for name, arg in calls:
+                outs.append(_tool(name, arg))
+            out = "\n\n".join(outs)
             context_blocks.append(out)
             transcript.append({"role": "assistant", "content": txt})
             if len(sources) >= 3:
                 transcript.append({"role": "user", "content": f"Tool result:\n{out}\n{EVIDENCE_SUFFICIENT_NUDGE}"})
             else:
                 transcript.append({"role": "user", "content": f"Tool result:\n{out}\nContinue or give FINAL JSON."})
+            if turns_used >= max_iters and len(sources) > sources_before and not bonus_used:
+                # Evidence landed on what would be the last turn (observed: a fetch
+                # consuming the final turn strands citable pages with no turn left to
+                # write them up). Grant exactly one bonus turn for FINAL composition.
+                bonus_used = True
+                max_iters += 1
+                transcript.append(
+                    {
+                        "role": "user",
+                        "content": "Late evidence accepted — one extra turn granted: "
+                        "reply FINAL JSON now, no more tools.",
+                    }
+                )
             continue
         if "FINAL" in txt or txt.startswith("{"):
             try:

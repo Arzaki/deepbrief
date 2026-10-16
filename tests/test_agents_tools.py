@@ -274,7 +274,9 @@ def test_researcher_final_turn_forbids_tools():
     # NOTE: MockProvider keeps a live reference to the transcript (which grows as the
     # final TOOL is processed), so assert membership, not position: the directive is
     # appended immediately before the final complete() call in code order.
-    assert len(llm.calls) == 6
+    # The 6th fetch lands new evidence on the last turn, so one bonus turn is granted
+    # (7th call), which returns empty findings via the Mock default.
+    assert len(llm.calls) == 7
     assert FINAL_TURN_DIRECTIVE in [m["content"] for m in last_messages]
     # graceful degradation still attaches everything fetched
     assert len(f.sources) == 6 and len(pages) == 6
@@ -404,16 +406,41 @@ def test_baseline_long_fetch_loop_stays_bounded():
     assert biggest <= 13500
 
 
-def test_researcher_empty_final_after_results_forces_one_fetch():
-    """FINAL with zero fetches while results sit unfetched: sent back once to fetch.
-    Second empty FINAL is accepted (genuinely nothing usable)."""
+def test_researcher_auto_fetch_top_result_eagerly():
+    """Non-empty search auto-fetches its top result in the SAME turn: no extra
+    LLM call is spent, and a subsequent empty FINAL is accepted with evidence attached."""
+    fetched = []
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(script=["TOOL: web_search | vector db", f"FINAL {final}"])
+    budgets = Budgets(max_llm_calls=10, max_tool_calls=10)
+    f, pages = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        budgets=budgets,
+        search_fn=lambda q: [
+            {"title": "t1", "url": "http://hit.test/a", "snippet": "s"},
+            {"title": "t2", "url": "http://hit.test/b", "snippet": "s"},
+        ],
+        fetch_fn=lambda u: (fetched.append(u), {"url": u, "title": "t", "text": "x"})[1],
+    )
+    assert fetched == ["http://hit.test/a"]  # top result only, eagerly
+    assert sorted(pages) == ["S1"] and f.claims == []
+    assert len(llm.calls) == 2  # search turn + FINAL turn: fetching cost no turn
+    assert budgets.tool_calls == 2  # search + auto-fetch both counted honestly
+
+
+def test_researcher_no_auto_fetch_without_http_url():
+    """Search hits without usable URLs: nothing to auto-fetch; the fetch-forcing
+    gate still sends the first empty FINAL back for a manual fetch."""
     fetched = []
     final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
     llm = MockProvider(
         script=[
             "TOOL: web_search | vector db",
             f"FINAL {final}",
-            "TOOL: fetch_page | http://hit.test/a",
+            "TOOL: fetch_page | http://known.test/page",
             f"FINAL {final}",
         ]
     )
@@ -422,27 +449,44 @@ def test_researcher_empty_final_after_results_forces_one_fetch():
         "q?",
         llm,
         "mock-agent",
-        search_fn=lambda q: [{"title": "t", "url": "http://hit.test/a", "snippet": "s"}],
+        search_fn=lambda q: [{"title": "t", "url": "", "snippet": "s"}],
         fetch_fn=lambda u: (fetched.append(u), {"url": u, "title": "t", "text": "x"})[1],
     )
-    assert fetched == ["http://hit.test/a"]
-    assert sorted(pages) == ["S1"] and f.claims == []
+    assert fetched == ["http://known.test/page"]
+    assert sorted(pages) == ["S1"]
+    assert len(llm.calls) == 4  # search, bounced FINAL, manual fetch, accepted FINAL
+
+
+def test_researcher_no_auto_fetch_past_evidence_bar():
+    """With 3+ pages already fetched, searches stop auto-fetching (context discipline)."""
+    fetched = []
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(
+        script=[
+            "TOOL: fetch_pages | http://x.com/1 http://x.com/2 http://x.com/3",
+            "TOOL: web_search | more",
+            f"FINAL {final}",
+        ]
+    )
+    run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: [{"title": "t", "url": "http://hit.test/z", "snippet": "s"}],
+        fetch_fn=lambda u: (fetched.append(u), {"url": u, "title": "t", "text": "x"})[1],
+    )
+    assert fetched == ["http://x.com/1", "http://x.com/2", "http://x.com/3"]
 
 
 def test_researcher_fabricated_sources_do_not_bypass_fetch_gate():
-    """Model-declared source entries without actual fetches must NOT satisfy the gate."""
+    """Model-declared source entries without actual fetches must NOT satisfy the gate.
+    (With eager auto-fetch, real evidence exists anyway; this pins that fabricated
+    entries alone never count as fetched evidence.)"""
     fab = json.dumps(
         {"sub_question_id": "SQ1", "claims": [], "sources": [{"id": "S99", "url": "http://made.up/x", "title": "fake"}]}
     )
-    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
-    llm = MockProvider(
-        script=[
-            "TOOL: web_search | vector db",
-            f"FINAL {fab}",
-            "TOOL: fetch_page | http://hit.test/a",
-            f"FINAL {final}",
-        ]
-    )
+    llm = MockProvider(script=["TOOL: web_search | vector db", f"FINAL {fab}"])
     fetched = []
     f, pages = run_researcher(
         "SQ1",
@@ -452,8 +496,9 @@ def test_researcher_fabricated_sources_do_not_bypass_fetch_gate():
         search_fn=lambda q: [{"title": "t", "url": "http://hit.test/a", "snippet": "s"}],
         fetch_fn=lambda u: (fetched.append(u), {"url": u, "title": "t", "text": "x"})[1],
     )
-    assert fetched == ["http://hit.test/a"]
-    assert sorted(pages) == ["S1"]
+    assert fetched == ["http://hit.test/a"]  # eager auto-fetch supplied real evidence
+    assert "S1" in pages
+    assert len(llm.calls) == 2  # accepted without an enforcement round-trip
 
 
 def test_researcher_empty_final_without_results_accepted():
@@ -526,3 +571,99 @@ def test_shared_sid_minter_unique_across_researchers():
     ids = [s.id for s in f1.sources + f2.sources]
     assert sorted(ids) == ["S1", "S2", "S3", "S4"]
     assert set(p1) | set(p2) == set(ids)
+
+
+def test_researcher_executes_multiple_tools_per_response():
+    """Two TOOL lines in one reply must BOTH run (previously the 2nd was glued into
+    the 1st query and searched as garbage)."""
+    seen_search, seen_fetch = [], []
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(script=["TOOL: web_search | q\nTOOL: fetch_page | http://x.com/a", f"FINAL {final}"])
+    f, pages = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: (seen_search.append(q), [])[1],
+        fetch_fn=lambda u: (seen_fetch.append(u), {"url": u, "title": "t", "text": "x"})[1],
+    )
+    assert seen_search == ["q"]
+    assert seen_fetch == ["http://x.com/a"]
+    assert sorted(pages) == ["S1"]
+    assert len(llm.calls) == 2  # one turn for both tools
+
+
+def test_researcher_tool_after_leading_chatter_runs():
+    """'Some text\\nTOOL: ...' must execute the tool (previously only leading TOOL: ran)."""
+    seen = []
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(script=["Let me search first.\nTOOL: web_search | q", f"FINAL {final}"])
+    run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: (seen.append(q), [])[1],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "x"},
+    )
+    assert seen == ["q"]
+
+
+def test_researcher_unknown_tool_text_falls_through():
+    """'TOOL: hammer | nail' (unknown tool) must not execute anything or stall the loop."""
+    seen = []
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(script=["I should use TOOL: hammer | nail for this", f"FINAL {final}"])
+    f, _ = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        search_fn=lambda q: (seen.append(q), [])[1],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "x"},
+    )
+    assert seen == [] and f.claims == []
+    assert len(llm.calls) == 2
+
+
+def test_researcher_bonus_turn_writes_up_late_evidence():
+    """Fetch landing on the last turn grants exactly one bonus turn so the evidence
+    gets written into FINAL instead of stranded (the neural-networks failure)."""
+    final = json.dumps(
+        {
+            "sub_question_id": "SQ1",
+            "claims": [{"text": "cnn", "source_id": "S1", "supporting_quote": "cnn"}],
+            "sources": [{"id": "S1", "url": "http://x.com/a", "title": "t"}],
+        }
+    )
+    llm = MockProvider(script=["TOOL: web_search | q", "TOOL: fetch_page | http://x.com/a", f"FINAL {final}"])
+    f, pages = run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        max_iters=2,
+        search_fn=lambda q: [{"title": "t", "url": "http://x.com/a", "snippet": "s"}],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "cnn stuff here"},
+    )
+    # Turn 0: search (+auto-fetch S1). Turn 1 (last): explicit fetch S2 -> bonus turn.
+    # Turn 2 (bonus): FINAL with claims using the fetched evidence.
+    assert len(llm.calls) == 3
+    assert [c.source_id for c in f.claims] == ["S1"]
+    assert set(pages) == {"S1", "S2"}
+
+
+def test_researcher_no_bonus_without_new_evidence():
+    """Bonus fires only for fresh evidence on the last turn, not for repeats."""
+    final = json.dumps({"sub_question_id": "SQ1", "claims": [], "sources": []})
+    llm = MockProvider(script=["TOOL: web_search | q", "TOOL: web_search | q", f"FINAL {final}"])
+    run_researcher(
+        "SQ1",
+        "q?",
+        llm,
+        "mock-agent",
+        max_iters=2,
+        search_fn=lambda q: [],
+        fetch_fn=lambda u: {"url": u, "title": "t", "text": "x"},
+    )
+    assert len(llm.calls) == 2  # duplicate blocked, no new evidence, no bonus turn
