@@ -137,4 +137,6 @@ with gr.Blocks(title="DeepBrief") as demo:
     btn.click(run_fn, inputs=[q, mode, depth, session], outputs=[report, stats, trace_view])
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    # ssr_mode=False: the SSR startup banner prints a lightning UTF-8 char that
+    # crashes launch() in the HF Space container (charmap/cp1252 stdout).
+    demo.launch(server_name="0.0.0.0", server_port=7860, ssr_mode=False)
