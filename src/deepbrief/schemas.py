@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -30,7 +30,7 @@ class Source(BaseModel):
     id: str
     url: str
     title: str = ""
-    fetched_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    fetched_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 class Claim(BaseModel):

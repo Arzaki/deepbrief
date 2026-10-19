@@ -8,7 +8,7 @@ import json
 import random
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))  # noqa: E402
@@ -219,7 +219,7 @@ def main():
     )
     depths = [d.strip() for d in args.depths.split(",") if d.strip()]
     RESULTS.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     rows: list[dict] = []
     # Incremental CSV: every completed row is flushed, so a killed eval keeps partial results.
     csv_path = RESULTS / f"results_{stamp}.csv"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..llm import BaseProvider
@@ -123,7 +123,7 @@ def run_researcher(
                     id=sid,
                     url=url,
                     title=pg.get("title", ""),
-                    fetched_at=datetime.now(UTC).isoformat(),
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
                 )
             )
             page_texts[sid] = text
