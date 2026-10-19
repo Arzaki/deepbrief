@@ -1,3 +1,15 @@
+---
+title: DeepBrief
+emoji: 📋
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+sdk_version: 6.29.1
+app_file: app.py
+license: mit
+short_description: Multi-agent research reports, cited and budget-capped
+---
+
 # DeepBrief — multi-agent research & cited reports
 
 One-paragraph summary: DeepBrief takes a research question and produces a structured, cited Markdown report plus a machine-readable JSON trace. A Planner splits the question into 3–5 sub-questions, a Researcher answers each with a plain-Python tool loop (`web_search`, `fetch_page`, `calculator`), a Writer synthesizes only researcher-supplied claims with `[Sx]` citations, and a Critic enforces a bounded (max 2) revision loop. A single-agent baseline with identical tools and budgets enables an honest comparison. All runs are budget-capped, cached, traced with cost/latency, and evaluated for coverage, citation accuracy, and faithfulness.
