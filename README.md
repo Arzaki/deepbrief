@@ -95,20 +95,36 @@ See [evals/FAILURES.md](evals/FAILURES.md) — filled only with failures actuall
 - Mock/offline judges are heuristics; live LLM judges + human spot-checks needed for trustworthy numbers.
 - Source quality ranking (domain reputation, recency) is minimal; critic flags weak sources but retrieval is naive.
 - No claim de-duplication/contradiction resolution across sub-questions beyond the critic pass.
-- Next: answer-stability review of all 25 questions, per-domain source allowlists, embedding-based re-ranking, judge–human agreement study, HF Spaces deploy.
+- Next: answer-stability review of all 25 questions, per-domain source allowlists, embedding-based re-ranking, judge–human agreement study.
 
-## Deploy to Hugging Face Spaces
+## Deploy
 
-> **Live demo:** TBD — paste the Space URL here after deploy.
-> **Repo:** TBD — paste the public GitHub URL here after push.
+> **Live demo:** TBD — paste the Render URL here after deploy.
+> **Repo:** https://github.com/Arzaki/deepbrief
 
-1. Create a Space (Gradio SDK, Python 3.11, free CPU). Upload (or repo-link) `app.py`,
-   `requirements.txt`, `runtime.txt`, `src/`, `prompts/` (entrypoint `app.py`).
-2. In Space **Settings → Secrets**, set `GROQ_API_KEY` (never in code). Optional:
-   `TAVILY_API_KEY`. In **Variables**, set `LLM_PROVIDER=groq`, plus tighter public-demo
-   budgets: `MAX_LLM_CALLS=25`, `SESSION_CAP=3`, `RESEARCH_WORKERS=2`.
-3. Expect free-tier behavior: Spaces sleep when idle (30–60s cold start), and every
-   visitor run spends **your** Groq quota (~$0.02 quick, ~$0.03–0.07 standard). The
-   per-session cap + per-run budgets exist exactly so one visitor cannot drain it.
-   Watch quota for the first days; tighten further if needed.
-4. The `Dockerfile` is provided for container deploys; Gradio SDK Spaces use `app.py` directly.
+### Render.com (Docker, free plan)
+
+1. In Render: **New + → Blueprint** → connect this repo. Render reads `render.yaml`
+   (Docker runtime, free plan, public-demo budgets: `MAX_LLM_CALLS=25`, `SESSION_CAP=3`,
+   `RESEARCH_WORKERS=2`).
+2. Add the one secret it can't sync: Environment → `GROQ_API_KEY` (optional `TAVILY_API_KEY`).
+3. Free-tier behavior: sleeps after ~15 min idle (~1 min cold start on first visit);
+   every run spends **your** Groq free-tier quota (~$0.02 quick, ~$0.03–0.07 standard).
+   The per-session cap + per-run budgets exist exactly so one visitor cannot drain it.
+
+### Running locally always works
+
+```bash
+uv sync --extra dev
+uv run python app.py    # http://localhost:7860
+```
+
+### Hugging Face Spaces (visited, not used)
+
+Deploying this project to HF was attempted and blocked by current policy: free accounts
+can host **Static** Spaces and ZeroGPU Spaces (the latter however hard-errors with
+"No @spaces.GPU function detected" for apps that make no GPU calls — this one calls the
+Groq API, nothing runs on Space GPUs), while plain Gradio/Docker CPU Spaces now require
+a PRO subscription. Notes from that attempt are kept in the repo history (Gradio SDK
+image is Python 3.10; gradio's SSR startup banner crashes on charmap stdout — both
+already fixed in code).
