@@ -1,0 +1,22 @@
+# Render.com blueprint (https://render.com/docs/blueprint-spec).
+# Deploy: "New +" -> "Blueprint" -> connect this repo; Render reads render.yaml.
+# Free plan: sleeps after ~15 min idle (~1 min cold start); every run spends the
+# Groq free-tier quota, hence the tighter budgets vs .env.example defaults.
+services:
+  - type: web
+    name: deepbrief
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: LLM_PROVIDER
+        value: groq
+      - key: MAX_LLM_CALLS
+        value: "25"
+      - key: SESSION_CAP
+        value: "3"
+      - key: RESEARCH_WORKERS
+        value: "2"
+      - key: GROQ_API_KEY
+        sync: false

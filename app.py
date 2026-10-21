@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import time
@@ -139,4 +140,10 @@ with gr.Blocks(title="DeepBrief") as demo:
 if __name__ == "__main__":
     # ssr_mode=False: the SSR startup banner prints a lightning UTF-8 char that
     # crashes launch() in the HF Space container (charmap/cp1252 stdout).
-    demo.launch(server_name="0.0.0.0", server_port=7860, ssr_mode=False)
+    # PORT: Render injects its own port and only routes traffic to it (7860 keeps
+    # local/uv usage working).
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.environ.get("PORT", "7860")),
+        ssr_mode=False,
+    )
