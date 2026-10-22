@@ -99,7 +99,7 @@ See [evals/FAILURES.md](evals/FAILURES.md) — filled only with failures actuall
 
 ## Deploy
 
-> **Live demo:** TBD — paste the Render URL here after deploy.
+> **Live demo:** https://deepbrief.onrender.com (free tier — ~50s cold start after idle)
 > **Repo:** https://github.com/Arzaki/deepbrief
 
 ### Render.com (Docker, free plan)
