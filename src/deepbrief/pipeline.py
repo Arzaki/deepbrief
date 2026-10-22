@@ -6,7 +6,7 @@ import itertools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
+from concurrent.futures import wait as futures_wait
 
 from .agents.critic import run_critic
 from .agents.planner import run_planner
@@ -183,26 +183,42 @@ def run_pipeline(
         results = [_research(sq) for sq in plan.sub_questions]
     else:
         # Sub-questions are independent; budgets/cache/trace/LLM client are all thread-safe.
-        # Each future is bounded: a hung researcher is abandoned (partial) instead of
-        # stalling the run past every other timeout (observed 2026-10-01: 600s, zero findings).
-        # NOTE: explicit shutdown(wait=False) — a `with` block would join hung workers and
-        # defeat the timeouts. A truly hung native call may leak its worker thread.
+        # ONE bounded wait for all futures instead of a timeout per future: sequential
+        # `fut.result(timeout=...)` waits stack (observed 2026-10-19 on Render: ~10
+        # pending sub-questions × 240s each = 2281s wall for one public-demo run under
+        # a 429 storm), so the whole research phase is now capped by the remaining wall
+        # budget and each researcher's personal timeout, whichever is tighter.
+        # NOTE: shutdown(wait=False) — a `with` block would join hung workers and
+        # defeat the deadline. A truly hung native call may leak its worker thread.
+        started_wall = budgets.started_at or time.time()
+        phase_deadline = min(
+            max(1.0, float(budgets.max_wall_seconds) - (time.time() - started_wall)),
+            max(1.0, float(len(plan.sub_questions) - 1) / max_workers + 1) * researcher_timeout_s,
+        )
         pool = ThreadPoolExecutor(max_workers=max_workers)
         try:
             futs = [pool.submit(_research, sq) for sq in plan.sub_questions]
+            done, not_done = futures_wait(futs, timeout=phase_deadline)
             results = []
             for sq, fut in zip(plan.sub_questions, futs, strict=True):
-                try:
-                    results.append(fut.result(timeout=researcher_timeout_s))
-                except FuturesTimeout:
+                if fut not in done:
+                    fut.cancel()
                     results.append(None)
-                    note = f"researcher_timeout({sq.id}>{researcher_timeout_s}s)"
+                    note = f"researcher_deadline({sq.id}, phase>{phase_deadline:.0f}s)"
                     ab = f"{abort_reason}; " if abort_reason else ""
                     abort_reason = ab + note
                     if verbose:
-                        print(f"[research timeout] {note}; continuing partial", flush=True)
+                        print(f"[research deadline] {note}; continuing partial", flush=True)
+                    continue
+                try:
+                    results.append(fut.result())
+                except Exception as e:  # noqa: BLE001 — dead future becomes partial
+                    results.append(None)
+                    note = f"{sq.id}:{type(e).__name__}"
+                    abort_reason = f"{abort_reason}; {note}" if abort_reason else note
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
+
     partial = False
     for res in results:
         if res is None:

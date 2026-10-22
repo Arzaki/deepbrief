@@ -18,5 +18,11 @@ services:
         value: "3"
       - key: RESEARCH_WORKERS
         value: "2"
+      # Public-demo guard: a 429-storm run once stretched to 2281s because sequential
+      # per-future researcher waits stacked under retries; 300s guarantees the visitor
+      # gets a (partial) report within ~5 min worst case. Code now also bounds the whole
+      # research phase by this budget, not just the abort reason.
+      - key: MAX_WALL_SECONDS
+        value: "300"
       - key: GROQ_API_KEY
         sync: false

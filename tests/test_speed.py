@@ -127,7 +127,7 @@ def test_pipeline_quota_storm_returns_partial_not_crash():
 
 
 def test_pipeline_researcher_timeout_continues_partial():
-    """A hung researcher is abandoned after researcher_timeout_s; others still report."""
+    """A hung researcher is abandoned at the phase deadline; others still report."""
     import time as _time
 
     plan3 = json.dumps({"sub_questions": [{"id": f"SQ{i}", "text": f"q{i}"} for i in range(1, 4)]})
@@ -155,7 +155,44 @@ def test_pipeline_researcher_timeout_continues_partial():
         fetch_fn=slow_fetch,
     )
     assert len(out["findings"]) == 2  # the hung researcher was dropped, the other two returned
-    assert "researcher_timeout" in out["abort_reason"]
+    assert "researcher_deadline" in out["abort_reason"]
+
+
+def test_pipeline_research_phase_bounded_by_wall_budget():
+    """The WHOLE research phase must respect the wall budget even when every
+    researcher hangs: sequential per-future waits stacked ~10×240s and produced a
+    2281s public-demo run under a 429 storm (Render, 2026-10-19). One bounded
+    wait for all futures caps the phase at the remaining wall budget."""
+    import time as _time
+
+    n = 5  # Plan schema caps sub_questions at 5; engineers the worst legal plan
+    plan5 = json.dumps({"sub_questions": [{"id": f"SQ{i}", "text": f"q{i}"} for i in range(1, n + 1)]})
+    # every researcher hangs inside a fetch that outlasts the phase deadline
+    llm = MockProvider(script=[plan5] + ["TOOL: fetch_page | http://slow.test/x"] * n)
+
+    budgets = Budgets(max_llm_calls=50, max_tool_calls=50, max_wall_seconds=6)
+
+    def slow_fetch(u):
+        _time.sleep(30)
+        return {"url": u, "title": "t", "text": "x"}
+
+    t0 = _time.perf_counter()
+    out = run_pipeline(
+        "q?",
+        llm,
+        "mock-agent",
+        "mock-cheap",
+        budgets=budgets,
+        cache=_cache(),
+        max_workers=2,
+        use_critic=False,
+        search_fn=lambda q: [],
+        fetch_fn=slow_fetch,
+    )
+    elapsed = _time.perf_counter() - t0
+    assert elapsed < 15  # 8 sequential 240s waits would be ~1920s; phase deadline ~6s
+    assert out["findings"] == []
+    assert "researcher_deadline" in out["abort_reason"] or "wall_clock_exceeded" in out["abort_reason"]
 
 
 def _calls_with(llm, needle):
